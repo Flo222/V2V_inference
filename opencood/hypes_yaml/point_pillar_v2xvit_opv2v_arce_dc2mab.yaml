@@ -1,0 +1,60 @@
+# PDF-aligned DC2MAB-ARCE config fragment.
+# Merge this with your existing point_pillar_v2xvit_opv2v_arce_markov.yaml.
+# Keep all model/dataset fields from the original YAML unchanged.
+
+name: point_pillar_v2xvit_opv2v_arce_dc2mab
+
+arce:
+  enabled: true
+  mode: dc2mab
+  policy: dc2mab_sender_ego
+  link_scope: non_ego
+  seed: 2026
+
+  deadline_ms: 100.0
+  enable_deadline_drop: true
+  late_policy: cache_only
+
+  packetizer:
+    mode: patch_max_size
+    patch_max_size: 4096
+
+  action_space:
+    type: pdf_48
+    send_values: [0, 1]
+    quant_modes: [fp32, fp16, int8, int4]
+    redundancy_ratios: [0.0, 0.25, 0.5]
+    cache_values: [0, 1]
+    fec_main: raptor_sim
+    xor_group_size: 4
+    decode_overhead: 0.0
+
+  context:
+    dim: 5
+    b_max_mbps: 27.0
+    deadline_ms: 100.0
+    confidence_threshold: 0.3
+
+  c2mab:
+    algorithm: discounted_linucb
+    context_dim: 5
+    lambda_reg: 1.0
+    discount: 0.97
+    beta: 1.0
+
+  ego_oracle:
+    type: greedy_knapsack
+    objective: ucb_over_cost
+    total_budget_mbps: 10.0
+    tau_trans_ms: 100.0
+
+  reward:
+    type: proxy_confidence
+    gamma: 0.1
+    eta: 0.2
+    update: selected_superarm
+
+  temporal_fusion:
+    enabled: true
+    beta: 5.0
+    update_rule: recv_ge_cache

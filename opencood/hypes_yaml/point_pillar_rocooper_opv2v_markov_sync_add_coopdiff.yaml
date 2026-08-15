@@ -1,0 +1,446 @@
+name: point_pillar_rocooper_opv2v
+root_dir: /home/server2/CoSDH/dataset/OPV2V/train
+validate_dir: /home/server2/CoSDH/dataset/OPV2V/validate
+yaml_parser: load_point_pillar_params
+wild_setting:
+  seed: 25
+  async: false
+  async_mode: sim
+  async_overhead: 0
+  loc_err: false
+  xyz_std: 0.2
+  ryp_std: 0.2
+  data_size: 1.06
+  transmission_speed: 27
+  backbone_delay: 0
+  channel_state_markov:
+    enabled: false
+train_params:
+  batch_size: 1
+  epoches: 60
+  eval_freq: 5
+  save_freq: 5
+  max_cav: 5
+fusion:
+  core_method: IntermediateFusionDataset
+  args: []
+preprocess:
+  core_method: SpVoxelPreprocessor
+  cav_lidar_range: &id001
+  - -140.8
+  - -40
+  - -3
+  - 140.8
+  - 40
+  - 1
+  args:
+    voxel_size: &id002
+    - 0.4
+    - 0.4
+    - 4
+    max_points_per_voxel: 32
+    max_voxel_train: 32000
+    max_voxel_test: 70000
+data_augment:
+- NAME: random_world_flip
+  ALONG_AXIS_LIST:
+  - x
+- NAME: random_world_rotation
+  WORLD_ROT_ANGLE:
+  - -0.78539816
+  - 0.78539816
+- NAME: random_world_scaling
+  WORLD_SCALE_RANGE:
+  - 0.95
+  - 1.05
+postprocess:
+  core_method: VoxelPostprocessor
+  anchor_args:
+    cav_lidar_range: *id001
+    l: 3.9
+    w: 1.6
+    h: 1.56
+    r:
+    - 0
+    - 90
+    feature_stride: 4
+    num: 2
+  target_args:
+    pos_threshold: 0.6
+    neg_threshold: 0.45
+    score_threshold: 0.2
+  order: hwl
+  max_num: 100
+  nms_thresh: 0.15
+model:
+  core_method: point_pillar_rocooper
+  args:
+    voxel_size: *id002
+    lidar_range: *id001
+    anchor_number: 2
+    max_cav: 5
+    compression: 0
+    backbone_fix: false
+    pillar_vfe:
+      use_norm: true
+      with_distance: false
+      use_absolute_xyz: true
+      num_filters:
+      - 64
+    point_pillar_scatter:
+      num_features: 64
+    base_bev_backbone:
+      layer_nums:
+      - 3
+      - 5
+      - 8
+      layer_strides:
+      - 2
+      - 2
+      - 2
+      num_filters:
+      - 64
+      - 128
+      - 256
+      upsample_strides:
+      - 1
+      - 2
+      - 4
+      num_upsample_filter:
+      - 128
+      - 128
+      - 128
+    shrink_header:
+      kernal_size:
+      - 3
+      stride:
+      - 2
+      padding:
+      - 1
+      dim:
+      - 256
+      input_dim: 384
+    rocooper:
+      enabled: true
+      use_ego_anchor: true
+      use_augmentor: true
+      use_aggregator: true
+      use_block_prioritizer: true
+      selected_block_ratio: 0.8
+      scales:
+      - 4
+      - 8
+      - 16
+      num_rounds: 2
+      in_channels: 256
+      hidden_channels: 256
+      num_heads: 8
+      dropout: 0.1
+      use_split_attention: true
+      use_self_attention_after_scatter: true
+      alignment:
+        enabled: true
+        discrete_ratio: 0.4
+        downsample_rate: 4
+        transform_direction: source_to_ego
+      
+    rocooper_comm:
+      enabled: true
+      impair_ego: false
+      train_with_impairment: true
+      test_with_impairment: true
+      use_vcqi: false
+      communication_range: 70
+      return_masks: false
+
+      # RoCooper first uses its native compression / resolution reduction.
+      # If still exceeding the Markov bandwidth budget, plain RoCooper drops it.
+      # Later GRACE/UCB can replace fallback_on_exceed with mark_for_ucb.
+      channel_state_mode: markov
+
+      markov_channel:
+        enabled: true
+        seed: 2026
+        initial_state: good
+        verbose: true
+        verbose_every: 500
+        states:
+          - good
+          - medium
+          - bad
+
+        transition_matrix:
+          good:
+            - 0.85
+            - 0.13
+            - 0.02
+          medium:
+            - 0.10
+            - 0.80
+            - 0.10
+          bad:
+            - 0.03
+            - 0.17
+            - 0.80
+
+        state_params:
+          good:
+            bandwidth_mode: rocooper_native_then_budget
+            bandwidth_mbps: 27.0
+            frame_interval_ms: 100
+            native_compression_policy: auto_to_budget
+            min_native_compression_ratio: 1.0
+            max_native_compression_ratio: 32.0
+            compression_ratio: 1.0
+            fallback_on_exceed: drop
+
+            packet_loss_mean: 1.0
+            packet_loss_std: 0.0
+            zero_fraction: 0.05
+
+            delay_mean_ms: 10
+            delay_std_ms: 0
+            max_delay_frames: 0
+
+            frame_drop_mean: 0.0
+            frame_drop_std: 0.0
+            fading_enabled: false
+
+          medium:
+            bandwidth_mode: rocooper_native_then_budget
+            bandwidth_mbps: 5.0
+            frame_interval_ms: 100
+            native_compression_policy: auto_to_budget
+            min_native_compression_ratio: 1.0
+            max_native_compression_ratio: 32.0
+            compression_ratio: 1.0
+            fallback_on_exceed: drop
+
+            packet_loss_mean: 1.0
+            packet_loss_std: 0.0
+            zero_fraction: 0.20
+
+            delay_mean_ms: 50
+            delay_std_ms: 0
+            max_delay_frames: 0
+
+            frame_drop_mean: 0.0
+            frame_drop_std: 0.0
+            fading_enabled: false
+
+          bad:
+            bandwidth_mode: rocooper_native_then_budget
+            bandwidth_mbps: 1.0
+            frame_interval_ms: 100
+            native_compression_policy: auto_to_budget
+            min_native_compression_ratio: 1.0
+            max_native_compression_ratio: 32.0
+            compression_ratio: 1.0
+            fallback_on_exceed: drop
+
+            packet_loss_mean: 1.0
+            packet_loss_std: 0.0
+            zero_fraction: 0.35
+
+            delay_mean_ms: 100
+            delay_std_ms: 0
+            max_delay_frames: 1
+
+            frame_drop_mean: 0.0
+            frame_drop_std: 0.0
+            fading_enabled: false
+
+      channel_fading:
+        enabled: false
+        model: rician
+        snr_db: 15
+        sigma_h: 0.1
+        sigma_w: 0.01
+        distance_aware: true
+        path_loss_exp: 2
+
+      network_loss:
+        enabled: true
+
+        bandwidth_limit:
+          enabled: true
+          mode: rocooper_native_then_budget
+          bandwidth_mbps: 27.0
+          frame_interval_ms: 100
+          native_compression_policy: auto_to_budget
+          min_native_compression_ratio: 1.0
+          max_native_compression_ratio: 32.0
+          compression_ratio: 1.0
+          fallback_on_exceed: drop
+          mean: 1.0
+          std: 0.0
+
+        delay:
+          enabled: true
+          mean_ms: 10
+          std_ms: 0
+          frame_interval_ms: 100
+          frame_interval: 100
+          max_delay_frames: 1
+
+        frame_drop:
+          enabled: false
+          drop_whole_cav_feature: false
+          mean: 0.0
+          std: 0.0
+
+        packet_loss:
+          enabled: true
+          granularity: block
+          block_size: 4
+          mean: 1.0
+          std: 0.0
+          zero_fraction: 0.05
+    # rocooper_comm:
+    #   enabled: true
+    #   impair_ego: false
+    #   communication_range: 70
+    #   train_with_impairment: true
+    #   test_with_impairment: true
+    #   use_vcqi: true
+    #   vcqi:
+    #     ideal_value: 20.0
+    #     average_loss_value: 10.0
+    #     min_value: 2.3
+    #     max_value: 20.0
+    #     alpha0: 1.0
+    #     alpha1: 1.0
+    #     alpha2: 1.0
+    #     alpha3: 1.0
+    #     alpha4: 1.0
+    #     alpha_c: 1.0
+    #     beta: 1.0
+    #     gamma: 1.0
+    #   channel_fading:
+    #     enabled: true
+    #     type: rician
+    #     snr_db: 15.0
+    #     p0: 1.0
+    #     path_loss_exponent: 2.0
+    #     mu_h_real: 1.0
+    #     mu_h_imag: 0.0
+    #     sigma_h: 0.1
+    #     sigma_w: 0.01
+    #     distance_aware: true
+    #   network_loss:
+    #     enabled: true
+    #     bandwidth_limit:
+    #       enabled: true
+    #       mean: 0.1
+    #       std: 0.05
+    #       compression_ratio: 1
+    #       mode: resolution_reduction
+    #     packet_loss:
+    #       enabled: true
+    #       mean: 0.15
+    #       std: 0.05
+    #       granularity: block
+    #       zero_fraction: 0.15
+    #       block_size: 4
+    #     delay:
+    #       enabled: true
+    #       mean_ms: 60
+    #       std_ms: 10
+    #       frame_interval_ms: 100
+    #       max_delay_frames: 3
+    #     frame_drop:
+    #       enabled: true
+    #       mean: 0.05
+    #       std: 0.05
+    #       drop_whole_cav_feature: true
+    augmentor:
+      enabled: true
+      spatial_channel_attention:
+        enabled: true
+        in_channels: 256
+        hidden_channels: 256
+        num_heads: 8
+        dropout: 0.1
+        use_learnable_scale: true
+        init_scale: 0.0
+      temporal_history:
+        enabled: true
+        tau: 0.8
+        history_len: 1
+        use_cross_attention: true
+        num_heads: 8
+        dropout: 0.1
+        init_with_current: true
+    aggregator:
+      enabled: true
+      in_channels: 256
+      hidden_channels: 256
+      output_fusion_mode: gated_residual
+      skip_invalid_others: true
+      use_self_attention_after_scatter: true
+      gated_neighbor_fusion:
+        fusion_mode: mean
+        gate_hidden_ratio: 0.25
+        gate_bias_init: -1.0
+        use_channel_gate: false
+      scales:
+      - 4
+      - 8
+      - 16
+      num_rounds: 2
+      scale_selector:
+        enabled: true
+        type: mlp
+        select_all_at_start: true
+        selected_scales:
+        - 4
+        - 8
+        - 16
+      cross_attention:
+        enabled: true
+        num_heads: 8
+        dim_head: 32
+        dropout: 0.1
+        mlp_ratio: 2.0
+        residual_scale: 0.5
+        use_relative_position_bias: true
+      self_attention:
+        enabled: true
+        num_heads: 8
+        dim_head: 32
+        dropout: 0.1
+        mlp_ratio: 2.0
+        residual_scale: 0.25
+        max_tokens_for_attention: 4096
+        fallback_mode: conv
+      split_attention:
+        enabled: true
+        radix: 3
+        reduction_factor: 4
+    block_prioritizer:
+      enabled: true
+      selected_block_ratio: 0.8
+      self_centric_selection: true
+      num_experts: 4
+      expert_hidden_dim: 128
+      gating_hidden_dim: 128
+      use_layer_norm: true
+      threshold_mode: topk
+      bypass_unselected_blocks: true
+loss:
+  core_method: point_pillar_loss
+  args:
+    cls_weight: 1.0
+    reg: 2.0
+optimizer:
+  core_method: Adam
+  lr: 0.001
+  args:
+    eps: 1e-10
+    weight_decay: 1e-4
+lr_scheduler:
+  core_method: multistep
+  gamma: 0.1
+  step_size:
+  - 30
+  - 50

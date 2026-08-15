@@ -1,0 +1,308 @@
+name: point_pillar_v2xvit_opv2v_arce
+
+# Put OPV2V under OpenCOOD/opv2v_data_dumping/
+# Example:
+# OpenCOOD/opv2v_data_dumping/train
+# OpenCOOD/opv2v_data_dumping/validate
+root_dir: "opv2v_data_dumping/train"
+validate_dir: "opv2v_data_dumping/validate"
+
+# Keep this block for compatibility with V2X-ViT / OpenCOOD wild settings.
+# For OPV2V baseline debug, keep all impairments disabled.
+wild_setting:
+  async: false
+  async_mode: 'sim'
+  async_overhead: 100
+  seed: 25
+  loc_err: false
+  xyz_std: 0.2
+  ryp_std: 0.2
+  data_size: 1.06
+  transmission_speed: 27
+  backbone_delay: 10
+
+yaml_parser: "load_point_pillar_params"
+
+train_params:
+  batch_size: &batch_size 1
+  epoches: 20
+  eval_freq: 1
+  save_freq: 1
+  max_cav: &max_cav 5
+
+fusion:
+  core_method: 'IntermediateFusionDataset'
+  args: []
+
+preprocess:
+  core_method: 'SpVoxelPreprocessor'
+  args:
+    voxel_size: &voxel_size [0.4, 0.4, 4]
+    max_points_per_voxel: 32
+    max_voxel_train: 32000
+    max_voxel_test: 70000
+  # Use V2X-ViT-compatible range so that the final feature size works with
+  # MSwin window sizes [4, 8, 16].
+  cav_lidar_range: &cav_lidar [-140.8, -38.4, -3, 140.8, 38.4, 1]
+
+data_augment:
+  - NAME: random_world_flip
+    ALONG_AXIS_LIST: ['x']
+
+  - NAME: random_world_rotation
+    WORLD_ROT_ANGLE: [-0.78539816, 0.78539816]
+
+  - NAME: random_world_scaling
+    WORLD_SCALE_RANGE: [0.95, 1.05]
+
+postprocess:
+  core_method: 'VoxelPostprocessor'
+  anchor_args:
+    cav_lidar_range: *cav_lidar
+    l: 3.9
+    w: 1.6
+    h: 1.56
+    r: [0, 90]
+    # V2X-ViT uses shrink_header stride=2 after PointPillar BEV backbone,
+    # so final output stride is 4.
+    feature_stride: 4
+    num: &achor_num 2
+  target_args:
+    pos_threshold: 0.6
+    neg_threshold: 0.45
+    score_threshold: 0.27
+  order: 'hwl'
+  max_num: 100
+  nms_thresh: 0.15
+
+model:
+  # Use OPV2V-compatible wrapper.
+  # It keeps V2X-ViT unchanged but provides default prior_encoding
+  # and spatial_correction_matrix for OPV2V.
+  core_method: point_pillar_transformer_opv2v_arce
+  args:
+    voxel_size: *voxel_size
+    lidar_range: *cav_lidar
+    anchor_number: *achor_num
+    max_cav: *max_cav
+
+    # 0 means no feature compression.
+    # You can later set this to 32 for V2X-ViT-style compressed communication.
+    compression: 0
+
+    backbone_fix: false
+    
+    arce:
+      enabled: true
+      mode: fixed
+      policy: fixed
+      seed: 2026
+
+      # ego 是本地特征，不经过无线通信；非 ego 协作车特征经过 ARCE。
+      link_scope: non_ego
+      ego_index: 0
+
+      record_per_frame: true
+      record_per_link: true
+      max_records: 100000
+      late_policy: cache_only
+      keep_tensor_results: false
+
+      channel:
+        mode: fixed
+        fixed_state: medium
+        seed: 2026
+
+        profiles:
+          good:
+            bandwidth_mbps: 27.0
+            ge:
+              p_GB: 0.378
+              p_BG: 0.883
+              h: 0.905
+              k: 0.969
+            jitter_ms: [2.0, 8.0]
+
+          medium:
+            bandwidth_mbps: 5.0
+            ge:
+              p_GB: 0.378
+              p_BG: 0.883
+              h: 0.810
+              k: 0.938
+            jitter_ms: [5.0, 20.0]
+
+          bad:
+            bandwidth_mbps: 1.0
+            ge:
+              p_GB: 0.417
+              p_BG: 0.973
+              h: 0.620
+              k: 0.948
+            jitter_ms: [10.0, 40.0]
+
+      latency:
+        enabled: true
+        model: size_bandwidth_plus_jitter
+        deadline_ms: 100.0
+        proc_delay_ms: 2.0
+        frame_interval_ms: 100.0
+        jitter_distribution: uniform
+        late_policy: cache_only
+        per_link_rng: true
+
+      packetizer:
+        mode: grid
+        grid_size: [10, 10]
+        pad_value: 0.0
+
+      quantization:
+        enabled: true
+        raw_bits: 32
+        granularity: per_tensor
+        compute_error: true
+        pack_int4: false
+
+      fec:
+        enabled: true
+        redundancy_ratio: 0.25
+        group_size: 4
+        decode_overhead: 0.0
+
+      recovery:
+        enabled: true
+        temporal_cache: true
+        spatial_interpolation: true
+        zero_fill: true
+
+        priority:
+          - temporal_cache
+          - spatial_interpolation
+          - zero_fill
+
+        cache_tau: 5.0
+        max_cache_age: 5
+        temporal_decay_mode: none
+        store_on_cpu: false
+        detach_cache: true
+        merge_update: true
+
+        spatial_neighbor_mode: 4
+        spatial_fallback_neighbor_mode: 8
+        spatial_min_neighbors: 1
+        spatial_resize_mode: bilinear
+        spatial_iterative: false
+        spatial_max_iters: 2
+
+        zero_fill_value: 0.0
+
+        update_cache: true
+        cache_update_include_direct: true
+        cache_update_include_fec: true
+        cache_update_include_temporal: true
+        cache_update_include_spatial: true
+        cache_update_include_zero: false
+
+      fixed_policy:
+        default_state: medium
+
+        profiles:
+          good:
+            quant_mode: fp16
+            fec_type: none
+            redundancy_ratio: 0.0
+            recovery: arce
+
+          medium:
+            quant_mode: int8
+            fec_type: xor
+            xor_group_size: 4
+            redundancy_ratio: 0.25
+            recovery: arce
+
+          bad:
+            quant_mode: int4
+            fec_type: raptor_sim
+            redundancy_ratio: 0.5
+            decode_overhead: 0.0
+            degree_distribution: robust_soliton
+            robust_soliton_c: 0.1
+            robust_soliton_delta: 0.5
+            max_decode_iters: 10000
+            recovery: arce
+
+    pillar_vfe:
+      use_norm: true
+      with_distance: false
+      use_absolute_xyz: true
+      num_filters: [64]
+
+    point_pillar_scatter:
+      num_features: 64
+
+    base_bev_backbone:
+      layer_nums: [3, 5, 8]
+      layer_strides: [2, 2, 2]
+      num_filters: [64, 128, 256]
+      upsample_strides: [1, 2, 4]
+      num_upsample_filter: [128, 128, 128]
+
+    # 384 -> 256 and spatial downsample by 2.
+    shrink_header:
+      kernal_size: [3]
+      stride: [2]
+      padding: [1]
+      dim: [256]
+      input_dim: 384
+
+    transformer:
+      encoder: &encoder
+        num_blocks: 1
+        depth: 3
+        use_roi_mask: true
+        use_RTE: &use_RTE true
+        RTE_ratio: &RTE_ratio 2
+
+        cav_att_config: &cav_att_config
+          dim: 256
+          use_hetero: true
+          use_RTE: *use_RTE
+          RTE_ratio: *RTE_ratio
+          heads: 8
+          dim_head: 32
+          dropout: 0.3
+
+        pwindow_att_config: &pwindow_att_config
+          dim: 256
+          heads: [16, 8, 4]
+          dim_head: [16, 32, 64]
+          dropout: 0.3
+          window_size: [4, 8, 16]
+          relative_pos_embedding: true
+          fusion_method: 'split_attn'
+
+        feed_forward: &feed_forward
+          mlp_dim: 256
+          dropout: 0.3
+
+        sttf: &sttf
+          voxel_size: *voxel_size
+          downsample_rate: 4
+
+loss:
+  core_method: point_pillar_loss
+  args:
+    cls_weight: 1.0
+    reg: 2.0
+
+optimizer:
+  core_method: Adam
+  lr: 0.001
+  args:
+    eps: 1e-10
+    weight_decay: 1e-4
+
+lr_scheduler:
+  core_method: multistep
+  gamma: 0.1
+  step_size: [10, 15]

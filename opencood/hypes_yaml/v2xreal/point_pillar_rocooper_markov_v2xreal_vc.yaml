@@ -1,0 +1,406 @@
+name: point_pillar_rocooper_markov_v2xreal_vc
+root_dir: /data/v2xreal/train
+validate_dir: /data/v2xreal/validate
+dataset_mode: vc
+yaml_parser: load_point_pillar_params
+wild_setting:
+  async: false
+  async_mode: sim
+  async_overhead: 100
+  seed: 25
+  loc_err: false
+  xyz_std: 0.2
+  ryp_std: 0.2
+  data_size: 1.06
+  transmission_speed: 27
+  backbone_delay: 10
+  channel_state_markov:
+    enabled: false
+train_params:
+  batch_size: 1
+  epoches: 20
+  eval_freq: 2
+  save_freq: 2
+  max_cav: 4
+fusion:
+  core_method: IntermediateFusionDatasetV2XReal
+  args:
+    cur_ego_pose_flag: false
+preprocess:
+  core_method: SpVoxelPreprocessor
+  args:
+    voxel_size: &id003
+    - 0.4
+    - 0.4
+    - 30
+    max_points_per_voxel: 32
+    max_voxel_train: 64000
+    max_voxel_test: 640000
+  cav_lidar_range: &id001
+  - -102.4
+  - -38.4
+  - -15
+  - 102.4
+  - 38.4
+  - 15
+  num_class: 3
+  anchor_generator_config: &id002
+  - class_name: vehicle
+    anchor_sizes:
+    - - 3.9
+      - 1.6
+      - 1.56
+    anchor_rotations:
+    - 0
+    - 1.57
+    anchor_bottom_heights:
+    - -1.78
+    align_center: true
+    feature_map_stride: 2
+    matched_threshold: 0.6
+    unmatched_threshold: 0.45
+  - class_name: pedestrian
+    anchor_sizes:
+    - - 0.8
+      - 0.6
+      - 1.73
+    anchor_rotations:
+    - 0
+    - 1.57
+    anchor_bottom_heights:
+    - -0.6
+    align_center: true
+    feature_map_stride: 2
+    matched_threshold: 0.5
+    unmatched_threshold: 0.35
+  - class_name: truck
+    anchor_sizes:
+    - - 8.0
+      - 3.0
+      - 3.0
+    anchor_rotations:
+    - 0
+    - 1.57
+    anchor_bottom_heights:
+    - -1.78
+    align_center: true
+    feature_map_stride: 2
+    matched_threshold: 0.6
+    unmatched_threshold: 0.45
+data_augment:
+- NAME: random_world_flip
+  ALONG_AXIS_LIST:
+  - x
+- NAME: random_world_rotation
+  WORLD_ROT_ANGLE:
+  - -0.78539816
+  - 0.78539816
+- NAME: random_world_scaling
+  WORLD_SCALE_RANGE:
+  - 0.95
+  - 1.05
+postprocess:
+  core_method: VoxelPostprocessorV2XReal
+  anchor_args:
+    cav_lidar_range: *id001
+    D: 1
+    H: 192
+    W: 512
+    vd: 30
+    vh: 0.4
+    vw: 0.4
+    num: 2
+    anchor_generator_config: *id002
+  target_args:
+    score_threshold: 0.2
+  order: hwl
+  max_num: 200
+  nms_thresh: 0.15
+model:
+  core_method: point_pillar_rocooper_v2xreal
+  args:
+    voxel_size: *id003
+    lidar_range: *id001
+    anchor_number: 2
+    anchor_num: 2
+    num_class: 3
+    head_dim: 256
+    max_cav: 4
+    compression: 0
+    backbone_fix: false
+    pillar_vfe:
+      use_norm: true
+      with_distance: false
+      use_absolute_xyz: true
+      num_filters:
+      - 64
+    point_pillar_scatter:
+      num_features: 64
+    base_bev_backbone:
+      layer_nums:
+      - 3
+      - 5
+      - 8
+      layer_strides:
+      - 2
+      - 2
+      - 2
+      num_filters:
+      - 64
+      - 128
+      - 256
+      upsample_strides:
+      - 1
+      - 2
+      - 4
+      num_upsample_filter:
+      - 128
+      - 128
+      - 128
+    shrink_header:
+      kernal_size:
+      - 3
+      stride:
+      - 1
+      padding:
+      - 1
+      dim:
+      - 256
+      input_dim: 384
+    rocooper:
+      enabled: true
+      use_ego_anchor: true
+      use_augmentor: true
+      use_aggregator: true
+      use_block_prioritizer: true
+      selected_block_ratio: 0.8
+      scales:
+      - 4
+      - 8
+      - 16
+      num_rounds: 2
+      in_channels: 256
+      hidden_channels: 256
+      num_heads: 8
+      dropout: 0.1
+      use_split_attention: true
+      use_self_attention_after_scatter: true
+      alignment:
+        enabled: true
+        discrete_ratio: 0.4
+        downsample_rate: 4
+        transform_direction: source_to_ego
+    rocooper_comm:
+      enabled: true
+      impair_ego: false
+      communication_range: 70
+      train_with_impairment: false
+      test_with_impairment: true
+      use_vcqi: false
+      return_masks: false
+      channel_state_mode: markov
+      markov_channel:
+        enabled: true
+        seed: 2026
+        initial_state: medium
+        verbose: false
+        verbose_every: 500
+        states:
+        - good
+        - medium
+        - bad
+        transition_matrix:
+          good:
+          - 0.85
+          - 0.13
+          - 0.02
+          medium:
+          - 0.1
+          - 0.8
+          - 0.1
+          bad:
+          - 0.03
+          - 0.17
+          - 0.8
+        state_params:
+          good:
+            bandwidth_mode: rocooper_native_then_budget
+            bandwidth_mbps: 27.0
+            frame_interval_ms: 100
+            native_compression_policy: auto_to_budget
+            min_native_compression_ratio: 1.0
+            max_native_compression_ratio: 32.0
+            compression_ratio: 1.0
+            fallback_on_exceed: drop
+            packet_loss_mean: 1.0
+            packet_loss_std: 0.0
+            zero_fraction: 0.05
+            delay_mean_ms: 10
+            delay_std_ms: 0
+            max_delay_frames: 0
+            frame_drop_mean: 0.0
+            frame_drop_std: 0.0
+            fading_enabled: false
+          medium:
+            bandwidth_mode: rocooper_native_then_budget
+            bandwidth_mbps: 5.0
+            frame_interval_ms: 100
+            native_compression_policy: auto_to_budget
+            min_native_compression_ratio: 1.0
+            max_native_compression_ratio: 32.0
+            compression_ratio: 1.0
+            fallback_on_exceed: drop
+            packet_loss_mean: 1.0
+            packet_loss_std: 0.0
+            zero_fraction: 0.2
+            delay_mean_ms: 50
+            delay_std_ms: 0
+            max_delay_frames: 0
+            frame_drop_mean: 0.0
+            frame_drop_std: 0.0
+            fading_enabled: false
+          bad:
+            bandwidth_mode: rocooper_native_then_budget
+            bandwidth_mbps: 1.0
+            frame_interval_ms: 100
+            native_compression_policy: auto_to_budget
+            min_native_compression_ratio: 1.0
+            max_native_compression_ratio: 32.0
+            compression_ratio: 1.0
+            fallback_on_exceed: drop
+            packet_loss_mean: 1.0
+            packet_loss_std: 0.0
+            zero_fraction: 0.35
+            delay_mean_ms: 100
+            delay_std_ms: 0
+            max_delay_frames: 1
+            frame_drop_mean: 0.0
+            frame_drop_std: 0.0
+            fading_enabled: false
+      channel_fading:
+        enabled: false
+      network_loss:
+        enabled: true
+        bandwidth_limit:
+          enabled: true
+          mode: rocooper_native_then_budget
+          bandwidth_mbps: 27.0
+          frame_interval_ms: 100
+          native_compression_policy: auto_to_budget
+          min_native_compression_ratio: 1.0
+          max_native_compression_ratio: 32.0
+          compression_ratio: 1.0
+          fallback_on_exceed: drop
+          mean: 1.0
+          std: 0.0
+        packet_loss:
+          enabled: true
+          granularity: block
+          block_size: 4
+          mean: 1.0
+          std: 0.0
+          zero_fraction: 0.05
+        delay:
+          enabled: true
+          mean_ms: 10
+          std_ms: 0
+          frame_interval_ms: 100
+          frame_interval: 100
+          max_delay_frames: 1
+        frame_drop:
+          enabled: false
+          drop_whole_cav_feature: false
+          mean: 0.0
+          std: 0.0
+    augmentor:
+      enabled: true
+      spatial_channel_attention:
+        enabled: true
+        in_channels: 256
+        hidden_channels: 256
+        num_heads: 8
+        dropout: 0.1
+        use_learnable_scale: true
+        init_scale: 0.0
+      temporal_history:
+        enabled: true
+        tau: 0.8
+        history_len: 1
+        use_cross_attention: true
+        num_heads: 8
+        dropout: 0.1
+        init_with_current: true
+    aggregator:
+      enabled: true
+      in_channels: 256
+      hidden_channels: 256
+      output_fusion_mode: gated_residual
+      skip_invalid_others: true
+      use_self_attention_after_scatter: true
+      gated_neighbor_fusion:
+        fusion_mode: mean
+        gate_hidden_ratio: 0.25
+        gate_bias_init: -1.0
+        use_channel_gate: false
+      scales:
+      - 4
+      - 8
+      - 16
+      num_rounds: 2
+      scale_selector:
+        enabled: true
+        type: mlp
+        select_all_at_start: true
+        selected_scales:
+        - 4
+        - 8
+        - 16
+      cross_attention:
+        enabled: true
+        num_heads: 8
+        dim_head: 32
+        dropout: 0.1
+        mlp_ratio: 2.0
+        residual_scale: 0.5
+        use_relative_position_bias: true
+      self_attention:
+        enabled: true
+        num_heads: 8
+        dim_head: 32
+        dropout: 0.1
+        mlp_ratio: 2.0
+        residual_scale: 0.25
+        max_tokens_for_attention: 4096
+        fallback_mode: conv
+      split_attention:
+        enabled: true
+        radix: 3
+        reduction_factor: 4
+    block_prioritizer:
+      enabled: true
+      selected_block_ratio: 0.8
+      self_centric_selection: true
+      num_experts: 4
+      expert_hidden_dim: 128
+      gating_hidden_dim: 128
+      use_layer_norm: true
+      threshold_mode: topk
+      bypass_unselected_blocks: true
+loss:
+  core_method: point_pillar_loss_v2xreal
+  args:
+    cls_weight: 1.0
+    reg: 2.0
+    num_class: 3
+optimizer:
+  core_method: Adam
+  lr: 0.001
+  args:
+    eps: 1.0e-10
+    weight_decay: 0.0001
+lr_scheduler:
+  core_method: multistep
+  gamma: 0.1
+  step_size:
+  - 15
+  - 50

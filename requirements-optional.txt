@@ -1,0 +1,6 @@
+# Optional/runtime dependencies used by specific baselines or experiments.
+# Install only when needed in the validated CUDA environment.
+icecream
+pyquaternion
+thop
+raptorq==1.6.3

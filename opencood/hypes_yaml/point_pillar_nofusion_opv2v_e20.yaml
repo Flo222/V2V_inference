@@ -1,0 +1,116 @@
+name: point_pillar_nofusion_opv2v_e20
+root_dir: "opv2v_data_dumping/train"
+validate_dir: "opv2v_data_dumping/validate"
+
+yaml_parser: "load_point_pillar_params"
+
+train_params:
+  batch_size: &batch_size 2
+  epoches: 20
+  eval_freq: 1
+  save_freq: 1
+  max_cav: &max_cav 1
+
+fusion:
+  core_method: 'LateFusionDataset'
+  args: []
+
+# preprocess-related
+preprocess:
+  core_method: 'SpVoxelPreprocessor'
+  args:
+    voxel_size: &voxel_size [0.4, 0.4, 4]
+    max_points_per_voxel: 32
+    max_voxel_train: 16000
+    max_voxel_test: 40000
+  # OPV2V ordinary PointPillar no-fusion / late-fusion range
+  cav_lidar_range: &cav_lidar [-70.4, -40, -3, 70.4, 40, 1]
+
+data_augment:
+  - NAME: random_world_flip
+    ALONG_AXIS_LIST: ['x']
+
+  - NAME: random_world_rotation
+    WORLD_ROT_ANGLE: [-0.78539816, 0.78539816]
+
+  - NAME: random_world_scaling
+    WORLD_SCALE_RANGE: [0.95, 1.05]
+
+# anchor box related
+postprocess:
+  core_method: 'VoxelPostprocessor'
+  anchor_args:
+    cav_lidar_range: *cav_lidar
+    l: 3.9
+    w: 1.6
+    h: 1.56
+    r: [0, 90]
+    feature_stride: 2
+
+    # Derived from:
+    # x range: 70.4 - (-70.4) = 140.8; 140.8 / 0.4 = 352; 352 / 2 = 176
+    # y range: 40 - (-40) = 80;       80 / 0.4 = 200;   200 / 2 = 100
+    W: 176
+    H: 100
+    vw: 0.8
+    vh: 0.8
+
+    num: &achor_num 2
+
+  target_args:
+    pos_threshold: 0.6
+    neg_threshold: 0.45
+    score_threshold: 0.20
+
+  order: 'hwl'
+  max_num: 100
+  nms_thresh: 0.15
+
+# model related
+model:
+  core_method: point_pillar
+  args:
+    voxel_size: *voxel_size
+    lidar_range: *cav_lidar
+    anchor_number: *achor_num
+
+    pillar_vfe:
+      use_norm: true
+      with_distance: false
+      use_absolute_xyz: true
+      num_filters: [64]
+
+    point_pillar_scatter:
+      num_features: 64
+      # Derived from cav_lidar_range and voxel_size:
+      # x grid: 140.8 / 0.4 = 352
+      # y grid: 80 / 0.4 = 200
+      # z grid: 4 / 4 = 1
+      grid_size: [352, 200, 1]
+
+    base_bev_backbone:
+      layer_nums: [3, 5, 8]
+      layer_strides: [2, 2, 2]
+      num_filters: [64, 128, 256]
+      upsample_strides: [1, 2, 4]
+      num_upsample_filter: [128, 128, 128]
+
+    anchor_num: *achor_num
+
+loss:
+  core_method: point_pillar_loss
+  args:
+    cls_weight: 1.0
+    reg: 2.0
+
+optimizer:
+  core_method: Adam
+  lr: 0.002
+  args:
+    eps: 1e-10
+    weight_decay: 1e-4
+
+lr_scheduler:
+  core_method: multistep
+  gamma: 0.1
+  step_size: [10, 15]

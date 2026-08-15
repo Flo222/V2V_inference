@@ -1,0 +1,454 @@
+name: point_pillar_where2comm_arce_ablate_no_comp
+root_dir: /data/opv2x/train
+validate_dir: /data/opv2x/validate
+wild_setting:
+  seed: 20
+  async: false
+  async_mode: sim
+  async_overhead: 100
+  loc_err: false
+  xyz_std: 0.2
+  ryp_std: 0.2
+  data_size: 1.06
+  transmission_speed: 27
+  backbone_delay: 10
+yaml_parser: load_point_pillar_params
+train_params:
+  batch_size: 1
+  epoches: 50
+  eval_freq: 1
+  save_freq: 1
+  max_cav: 5
+fusion:
+  core_method: IntermediateFusionDataset
+  args: []
+preprocess:
+  core_method: SpVoxelPreprocessor
+  args:
+    voxel_size: &id002
+    - 0.4
+    - 0.4
+    - 4
+    max_points_per_voxel: 32
+    max_voxel_train: 32000
+    max_voxel_test: 70000
+  cav_lidar_range: &id001
+  - -140.8
+  - -38.4
+  - -3
+  - 140.8
+  - 38.4
+  - 1
+data_augment:
+- NAME: random_world_flip
+  ALONG_AXIS_LIST:
+  - x
+- NAME: random_world_rotation
+  WORLD_ROT_ANGLE:
+  - -0.78539816
+  - 0.78539816
+- NAME: random_world_scaling
+  WORLD_SCALE_RANGE:
+  - 0.95
+  - 1.05
+postprocess:
+  core_method: VoxelPostprocessor
+  anchor_args:
+    cav_lidar_range: *id001
+    l: 3.9
+    w: 1.6
+    h: 1.56
+    r:
+    - 0
+    - 90
+    num: 2
+    feature_stride: 4
+  target_args:
+    pos_threshold: 0.6
+    neg_threshold: 0.45
+    score_threshold: 0.2
+  order: hwl
+  max_num: 100
+  nms_thresh: 0.15
+model:
+  core_method: point_pillar_where2comm_arce
+  args:
+    voxel_size: *id002
+    lidar_range: *id001
+    anchor_number: 2
+    head_dim: 256
+    max_cav: 5
+    compression: 0
+    backbone_fix: false
+    pillar_vfe:
+      use_norm: true
+      with_distance: false
+      use_absolute_xyz: true
+      num_filters:
+      - 64
+    point_pillar_scatter:
+      num_features: 64
+    base_bev_backbone:
+      layer_nums: &id003
+      - 3
+      - 5
+      - 8
+      layer_strides:
+      - 2
+      - 2
+      - 2
+      num_filters: &id004
+      - 64
+      - 128
+      - 256
+      upsample_strides:
+      - 1
+      - 2
+      - 4
+      num_upsample_filter:
+      - 128
+      - 128
+      - 128
+    shrink_header:
+      kernal_size:
+      - 3
+      stride:
+      - 2
+      padding:
+      - 1
+      dim:
+      - 256
+      input_dim: 384
+    where2comm_fusion:
+      fully: false
+      voxel_size: *id002
+      downsample_rate: 4
+      in_channels: 256
+      multi_scale: true
+      layer_nums: *id003
+      num_filters: *id004
+      communication:
+        round: 1
+        threshold: 0.01
+        gaussian_smooth:
+          k_size: 5
+          c_sigma: 1.0
+    arce:
+      enabled: true
+      mode: dc2mab
+      policy: dc2mab_sender_ego
+      link_scope: non_ego
+      seed: 2026
+      action_space:
+        type: final_36
+        send:
+        - 0
+        - 1
+        quant:
+        - fp16
+        - int8
+        - int4
+        rho:
+        - 0.0
+        - 0.25
+        - 0.5
+        cache:
+        - 0
+        - 1
+        proposal_send_only: true
+      context:
+        dim: 5
+        use_complementarity: false
+        normalize_bandwidth_by_mbps: 27.0
+        normalize_delay_by_ms: 400.0
+      c2mab:
+        context_dim: 5
+        ridge_lambda: 1.0
+        discount: 0.97
+        exploration_beta: 1.0
+        update_feedback: link_proxy_reward
+      reward:
+        type: final_proxy
+        topk_confidence: 20
+        confidence_threshold: 0.3
+        alpha_q: 0.5
+        alpha_cost: 0.3
+        alpha_delay: 0.2
+        alpha_violation: 1.0
+        tau_stale_ms: 300.0
+        stale_norm_ms: 400.0
+        q_min: 0.3
+      ego_oracle:
+        type: diversity_greedy_knapsack
+        budget_scope: global_sum_link
+        max_budget_cavs: 4
+        lambda_comp: 0.0
+        lambda_red: 0.5
+        eps: 1.0e-06
+      channel:
+        mode: markov
+        initial_state: medium
+        seed: 2026
+        states:
+        - good
+        - medium
+        - bad
+        transition_matrix:
+        - - 0.9
+          - 0.09
+          - 0.01
+        - - 0.12
+          - 0.82
+          - 0.06
+        - - 0.02
+          - 0.23
+          - 0.75
+        profiles:
+          good:
+            bandwidth_mbps: 27.0
+            loss_rate: 0.03
+            delay_ms:
+            - 15.0
+            - 25.0
+            jitter_ms:
+            - 0.0
+            - 5.0
+          medium:
+            bandwidth_mbps: 5.0
+            loss_rate: 0.12
+            delay_ms:
+            - 80.0
+            - 100.0
+            jitter_ms:
+            - 5.0
+            - 15.0
+          bad:
+            bandwidth_mbps: 1.0
+            loss_rate: 0.28
+            delay_ms:
+            - 200.0
+            - 400.0
+            jitter_ms:
+            - 15.0
+            - 40.0
+      scheduler:
+        fps: 10
+        tx_window_ms: 100.0
+        frame_interval_ms: 100.0
+        budget_source: channel_profiles
+        budget_scope: global_sum_link
+        per_link_budget: true
+      packetizer:
+        mode: block
+        block_size:
+        - 4
+        - 4
+        align_to_where2comm_mask: true
+        pad_boundary: true
+      patch_selection:
+        enabled: true
+        source: where2comm_mask
+        mask_threshold: 0.05
+        patch_selector: score_per_byte
+        ranking: score_per_byte
+        enforce_link_budget: true
+        min_effective_patch_ratio: 0.2
+        min_patch_count: 1
+        metadata_bytes_per_packet: 8
+        score:
+          lambda_mask: 1.0
+          lambda_activation: 0.2
+          lambda_complementarity: 0.3
+      latency:
+        enabled: true
+        deadline_ms: 100.0
+        frame_interval_ms: 100.0
+        proc_delay_ms: 10.0
+        late_policy: allow_stale
+        tau_stale_ms: 300.0
+      recovery:
+        temporal_cache: true
+        spatial_interpolation: true
+        zero_fill: true
+        temporal_fusion:
+          enabled: true
+          beta: 5.0
+          tau_stale_ms: 300.0
+          use_delay_penalty: true
+          update_rule: recv_ge_cache
+      fec:
+        apply_to: selected_patches_only
+      metrics:
+        save_frame_records: true
+        save_link_records: true
+        save_detection_state_index: true
+        success_q_min: 0.3
+        success_min_effective_patch_ratio: 0.2
+loss:
+  core_method: point_pillar_loss
+  args:
+    cls_weight: 1.0
+    reg: 2.0
+optimizer:
+  core_method: Adam
+  lr: 2e-4
+  args:
+    eps: 1e-10
+    weight_decay: 1e-2
+lr_scheduler:
+  core_method: cosineannealwarm
+  epoches: 50
+  warmup_lr: 2e-5
+  warmup_epoches: 10
+  lr_min: 5e-6
+arce:
+  enabled: true
+  mode: dc2mab
+  policy: dc2mab_sender_ego
+  link_scope: non_ego
+  seed: 2026
+  action_space:
+    type: final_36
+    send:
+    - 0
+    - 1
+    quant:
+    - fp16
+    - int8
+    - int4
+    rho:
+    - 0.0
+    - 0.25
+    - 0.5
+    cache:
+    - 0
+    - 1
+    proposal_send_only: true
+  context:
+    dim: 6
+    use_complementarity: true
+    normalize_bandwidth_by_mbps: 27.0
+    normalize_delay_by_ms: 400.0
+  c2mab:
+    context_dim: 6
+    ridge_lambda: 1.0
+    discount: 0.97
+    exploration_beta: 1.0
+    update_feedback: link_proxy_reward
+  reward:
+    type: final_proxy
+    topk_confidence: 20
+    confidence_threshold: 0.3
+    alpha_q: 0.5
+    alpha_cost: 0.3
+    alpha_delay: 0.2
+    alpha_violation: 1.0
+    tau_stale_ms: 300.0
+    stale_norm_ms: 400.0
+    q_min: 0.3
+  ego_oracle:
+    type: diversity_greedy_knapsack
+    budget_scope: global_sum_link
+    max_budget_cavs: 4
+    lambda_comp: 0.5
+    lambda_red: 0.5
+    eps: 1.0e-06
+  channel:
+    mode: markov
+    initial_state: medium
+    seed: 2026
+    states:
+    - good
+    - medium
+    - bad
+    transition_matrix:
+    - - 0.9
+      - 0.09
+      - 0.01
+    - - 0.12
+      - 0.82
+      - 0.06
+    - - 0.02
+      - 0.23
+      - 0.75
+    profiles:
+      good:
+        bandwidth_mbps: 27.0
+        loss_rate: 0.03
+        delay_ms:
+        - 15.0
+        - 25.0
+        jitter_ms:
+        - 0.0
+        - 5.0
+      medium:
+        bandwidth_mbps: 5.0
+        loss_rate: 0.12
+        delay_ms:
+        - 80.0
+        - 100.0
+        jitter_ms:
+        - 5.0
+        - 15.0
+      bad:
+        bandwidth_mbps: 1.0
+        loss_rate: 0.28
+        delay_ms:
+        - 200.0
+        - 400.0
+        jitter_ms:
+        - 15.0
+        - 40.0
+  scheduler:
+    fps: 10
+    tx_window_ms: 100.0
+    frame_interval_ms: 100.0
+    budget_source: channel_profiles
+    budget_scope: global_sum_link
+    per_link_budget: true
+  packetizer:
+    mode: block
+    block_size:
+    - 4
+    - 4
+    align_to_where2comm_mask: true
+    pad_boundary: true
+  patch_selection:
+    enabled: true
+    source: where2comm_mask
+    mask_threshold: 0.05
+    patch_selector: score_per_byte
+    ranking: score_per_byte
+    enforce_link_budget: true
+    min_effective_patch_ratio: 0.2
+    min_patch_count: 1
+    metadata_bytes_per_packet: 8
+    score:
+      lambda_mask: 1.0
+      lambda_activation: 0.2
+      lambda_complementarity: 0.3
+  latency:
+    enabled: true
+    deadline_ms: 100.0
+    frame_interval_ms: 100.0
+    proc_delay_ms: 10.0
+    late_policy: allow_stale
+    tau_stale_ms: 300.0
+  recovery:
+    temporal_cache: true
+    spatial_interpolation: true
+    zero_fill: true
+    temporal_fusion:
+      enabled: true
+      beta: 5.0
+      tau_stale_ms: 300.0
+      use_delay_penalty: true
+      update_rule: recv_ge_cache
+  fec:
+    apply_to: selected_patches_only
+  metrics:
+    save_frame_records: true
+    save_link_records: true
+    save_detection_state_index: true
+    success_q_min: 0.3
+    success_min_effective_patch_ratio: 0.2

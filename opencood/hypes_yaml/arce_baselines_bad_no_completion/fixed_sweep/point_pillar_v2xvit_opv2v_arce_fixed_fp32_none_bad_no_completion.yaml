@@ -1,0 +1,314 @@
+name: point_pillar_v2xvit_opv2v_arce_fixed_fp32_none_fixed_bad_channel_no_completion
+root_dir: opv2v_data_dumping/train
+validate_dir: opv2v_data_dumping/validate
+wild_setting:
+  async: true
+  async_mode: markov
+  async_overhead: 100
+  seed: 25
+  loc_err: false
+  xyz_std: 0.2
+  ryp_std: 0.2
+  data_size: 1.06
+  transmission_speed: 27
+  backbone_delay: 10
+  frame_interval_ms: 100
+  channel_state_markov:
+    enabled: true
+    scope: link
+    seed: 2026
+    initial_state: bad
+    states:
+    - good
+    - medium
+    - bad
+    transition_matrix:
+      good:
+        good: 0.0
+        medium: 0.0
+        bad: 1.0
+      medium:
+        good: 0.0
+        medium: 0.0
+        bad: 1.0
+      bad:
+        good: 0.0
+        medium: 0.0
+        bad: 1.0
+    delay_ms:
+      good: 100
+      medium: 200
+      bad: 400
+yaml_parser: load_point_pillar_params
+train_params:
+  batch_size: 1
+  epoches: 20
+  eval_freq: 1
+  save_freq: 1
+  max_cav: 5
+fusion:
+  core_method: IntermediateFusionDataset
+  args:
+    proj_first: true
+    cur_ego_pose_flag: true
+preprocess:
+  core_method: SpVoxelPreprocessor
+  args:
+    voxel_size: &id002
+    - 0.4
+    - 0.4
+    - 4
+    max_points_per_voxel: 32
+    max_voxel_train: 32000
+    max_voxel_test: 70000
+  cav_lidar_range: &id001
+  - -140.8
+  - -38.4
+  - -3
+  - 140.8
+  - 38.4
+  - 1
+data_augment:
+- NAME: random_world_flip
+  ALONG_AXIS_LIST:
+  - x
+- NAME: random_world_rotation
+  WORLD_ROT_ANGLE:
+  - -0.78539816
+  - 0.78539816
+- NAME: random_world_scaling
+  WORLD_SCALE_RANGE:
+  - 0.95
+  - 1.05
+postprocess:
+  core_method: VoxelPostprocessor
+  anchor_args:
+    cav_lidar_range: *id001
+    l: 3.9
+    w: 1.6
+    h: 1.56
+    r:
+    - 0
+    - 90
+    feature_stride: 4
+    num: 2
+  target_args:
+    pos_threshold: 0.6
+    neg_threshold: 0.45
+    score_threshold: 0.27
+  order: hwl
+  max_num: 100
+  nms_thresh: 0.15
+model:
+  core_method: point_pillar_transformer_opv2v_arce
+  args:
+    voxel_size: *id002
+    lidar_range: *id001
+    anchor_number: 2
+    max_cav: 5
+    compression: 0
+    backbone_fix: false
+    arce:
+      enabled: true
+      mode: fixed
+      seed: 2026
+      link_scope: non_ego
+      late_policy: allow
+      enable_deadline_drop: false
+      channel:
+        mode: fixed
+        fixed_state: medium
+      packetizer:
+        mode: patch_max_size
+        patch_max_size: 80
+        pad_value: 0.0
+      quantization:
+        granularity: per_tensor
+        compute_error: true
+      fec:
+        enabled: true
+        use_padded_packet_size: true
+      recovery:
+        enabled: true
+        temporal_cache: false
+        spatial_interpolation: false
+        zero_fill: true
+        priority:
+        - zero_fill
+        zero_fill_value: 0.0
+        update_cache: false
+        cache_update_include_direct: false
+        cache_update_include_fec: false
+        cache_update_include_temporal: false
+        cache_update_include_spatial: false
+        cache_update_include_zero: false
+      fixed_policy:
+        enabled: true
+        default_state: medium
+        profiles:
+          good:
+            name: fp32_none
+            quant_mode: fp32
+            fec_type: none
+            redundancy_ratio: 0.0
+            recovery: zero_fill
+            recovery_priority:
+            - zero_fill
+          medium:
+            name: fp32_none
+            quant_mode: fp32
+            fec_type: none
+            redundancy_ratio: 0.0
+            recovery: zero_fill
+            recovery_priority:
+            - zero_fill
+          bad:
+            name: fp32_none
+            quant_mode: fp32
+            fec_type: none
+            redundancy_ratio: 0.0
+            recovery: zero_fill
+            recovery_priority:
+            - zero_fill
+      policy: fixed
+    pillar_vfe:
+      use_norm: true
+      with_distance: false
+      use_absolute_xyz: true
+      num_filters:
+      - 64
+    point_pillar_scatter:
+      num_features: 64
+    base_bev_backbone:
+      layer_nums:
+      - 3
+      - 5
+      - 8
+      layer_strides:
+      - 2
+      - 2
+      - 2
+      num_filters:
+      - 64
+      - 128
+      - 256
+      upsample_strides:
+      - 1
+      - 2
+      - 4
+      num_upsample_filter:
+      - 128
+      - 128
+      - 128
+    shrink_header:
+      kernal_size:
+      - 3
+      stride:
+      - 2
+      padding:
+      - 1
+      dim:
+      - 256
+      input_dim: 384
+    transformer:
+      encoder:
+        num_blocks: 1
+        depth: 3
+        use_roi_mask: true
+        use_RTE: true
+        RTE_ratio: 2
+        cav_att_config:
+          dim: 256
+          use_hetero: true
+          use_RTE: true
+          RTE_ratio: 2
+          heads: 8
+          dim_head: 32
+          dropout: 0.3
+        pwindow_att_config:
+          dim: 256
+          heads:
+          - 16
+          - 8
+          - 4
+          dim_head:
+          - 16
+          - 32
+          - 64
+          dropout: 0.3
+          window_size:
+          - 4
+          - 8
+          - 16
+          relative_pos_embedding: true
+          fusion_method: split_attn
+        feed_forward:
+          mlp_dim: 256
+          dropout: 0.3
+        sttf:
+          voxel_size: *id002
+          downsample_rate: 4
+loss:
+  core_method: point_pillar_loss
+  args:
+    cls_weight: 1.0
+    reg: 2.0
+optimizer:
+  core_method: Adam
+  lr: 0.001
+  args:
+    eps: 1e-10
+    weight_decay: 1e-4
+lr_scheduler:
+  core_method: multistep
+  gamma: 0.1
+  step_size:
+  - 10
+  - 15
+arce:
+  enabled: true
+  mode: fixed
+  seed: 2026
+  link_scope: non_ego
+  late_policy: allow
+  enable_deadline_drop: false
+  channel:
+    mode: fixed
+    fixed_state: medium
+  packetizer:
+    mode: patch_max_size
+    patch_max_size: 80
+    pad_value: 0.0
+  quantization:
+    granularity: per_tensor
+    compute_error: true
+  fec:
+    enabled: true
+    use_padded_packet_size: true
+  recovery:
+    temporal_cache: true
+    spatial_interpolation: true
+    zero_fill: true
+  fixed_policy:
+    enabled: true
+    default_state: medium
+    profiles:
+      good:
+        name: fp32_none
+        quant_mode: fp32
+        fec_type: none
+        redundancy_ratio: 0.0
+        recovery: arce
+      medium:
+        name: fp32_none
+        quant_mode: fp32
+        fec_type: none
+        redundancy_ratio: 0.0
+        recovery: arce
+      bad:
+        name: fp32_none
+        quant_mode: fp32
+        fec_type: none
+        redundancy_ratio: 0.0
+        recovery: arce
+  policy: fixed
