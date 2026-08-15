@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from opencood.communication.channel.channel_manager import ChannelManager
+
 
 class CosDHMarkovByteChannel(nn.Module):
     """
@@ -91,10 +93,22 @@ class CosDHMarkovByteChannel(nn.Module):
             },
         })
 
-        self.verbose = bool(cfg.get("verbose", False))
+        self.channel_manager = ChannelManager({
+            "seed": int(cfg.get("seed", 0)),
+            "channel": {
+                "mode": "markov",
+                "initial_state": self.initial_state,
+                "transition_matrix": self.transition_matrix,
+                "profiles": self.state_profiles,
+                "loss_model": "bernoulli",
+                "bernoulli_loss_rates": {
+                    state: float(profile.get("packet_loss_rate", 0.0))
+                    for state, profile in self.state_profiles.items()
+                },
+            },
+        })
 
-        # Link-level Markov state persists across frames.
-        self._link_state = {}
+        self.verbose = bool(cfg.get("verbose", False))
 
         # Optional CAV-id aliases for the current ego frame.  When available,
         # intermediate CoSDH features and late dense detections use the same
@@ -109,6 +123,7 @@ class CosDHMarkovByteChannel(nn.Module):
 
         self.latest_info = []
         self._frame_index = -1
+        self._current_frame_id = None
 
         # Cache only when at least one profile can request previous-frame data.
         self.need_delay_cache = False
@@ -143,6 +158,10 @@ class CosDHMarkovByteChannel(nn.Module):
             aliases.append(str(item))
         return aliases
 
+    def set_channel_manager(self, channel_manager) -> None:
+        """Thin adapter injection; CoSDH keeps its own message semantics."""
+        self.channel_manager = channel_manager
+
     def start_frame(self, frame_id=None, link_key_aliases=None):
         """Start a new inference frame/session.
 
@@ -155,6 +174,7 @@ class CosDHMarkovByteChannel(nn.Module):
         self._frame_index += 1
         self._frame_sessions = {}
         self.latest_info = []
+        self._current_frame_id = frame_id
         aliases = self._normalize_link_aliases(link_key_aliases)
         if aliases is not None:
             self._link_key_aliases = aliases
@@ -164,23 +184,6 @@ class CosDHMarkovByteChannel(nn.Module):
         if aliases is not None and int(b) == 0 and int(local_idx) < len(aliases):
             return "link_{}".format(aliases[int(local_idx)])
         return "b{}_cav{}".format(int(b), int(local_idx))
-
-    def _next_state(self, link_key, device):
-        cur = self._link_state.get(link_key, self.initial_state)
-        probs_dict = self.transition_matrix.get(cur, {})
-
-        probs = torch.tensor(
-            [float(probs_dict.get(s, 0.0)) for s in self.states],
-            dtype=torch.float32,
-            device=device,
-        )
-        if probs.sum() <= 0:
-            probs = torch.ones(len(self.states), dtype=torch.float32, device=device)
-
-        probs = probs / probs.sum().clamp_min(1e-6)
-        nxt = self.states[torch.multinomial(probs, 1).item()]
-        self._link_state[link_key] = nxt
-        return nxt
 
     def _delay_slots_from_profile(self, profile):
         temporal_source = profile.get("temporal_source", "current")
@@ -206,18 +209,22 @@ class CosDHMarkovByteChannel(nn.Module):
         if link_key in self._frame_sessions:
             return self._frame_sessions[link_key]
 
-        state = self._next_state(link_key, device)
-        profile = self.state_profiles[state]
-
-        bandwidth_mbps = float(profile.get("bandwidth_mbps", 0.0))
-        budget_bytes = int(bandwidth_mbps * 1e6 / 8.0 / max(self.fps, 1e-6))
-        budget_packets = max(0, budget_bytes // max(self.packet_size_bytes, 1))
-        budget_bytes = int(budget_packets * self.packet_size_bytes)
+        budget = self.channel_manager.get_frame_budget(
+            frame_interval_ms=1000.0 / max(self.fps, 1e-6),
+            link_id=link_key,
+            frame_id=self._current_frame_id,
+            packet_size_bytes=self.packet_size_bytes,
+        )
+        state = budget["channel_state"]
+        profile = budget["profile"]
+        budget_bytes = int(budget["budget_bytes"])
+        budget_packets = int(budget["budget_packets"] or 0)
 
         session = {
             "state": state,
             "profile": profile,
-            "bandwidth_mbps": bandwidth_mbps,
+            "link_key": link_key,
+            "bandwidth_mbps": float(budget["bandwidth_mbps"]),
             "packet_loss_rate": float(profile.get("packet_loss_rate", 0.0)),
             "delay_slots": self._delay_slots_from_profile(profile),
             "initial_budget_bytes": budget_bytes,
@@ -367,14 +374,19 @@ class CosDHMarkovByteChannel(nn.Module):
         consumed_bytes = int(max_send_cells * cell_bytes)
         session["remaining_budget_bytes"] = max(0, remaining_before - consumed_bytes)
 
-        packet_loss_rate = float(session["packet_loss_rate"])
-
-        if packet_loss_rate <= 0:
-            recv = torch.ones(max_send_cells, dtype=torch.bool, device=msg.device)
-        else:
-            packets_per_cell = max(1, int(math.ceil(cell_bytes / float(max(self.packet_size_bytes, 1)))))
-            keep_prob = (1.0 - packet_loss_rate) ** packets_per_cell
-            recv = torch.rand(max_send_cells, device=msg.device) < keep_prob
+        tx_packets = int(math.ceil(consumed_bytes / float(max(self.packet_size_bytes, 1))))
+        packet_keep, _ = self.channel_manager.sample_receive_mask(
+            num_packets=tx_packets,
+            link_id=session["link_key"],
+            frame_id=self._current_frame_id,
+            state=session["state"],
+            device=msg.device,
+            return_info=True,
+        )
+        byte_start = torch.arange(max_send_cells, device=msg.device) * cell_bytes
+        first_packet = byte_start // self.packet_size_bytes
+        last_packet = (byte_start + cell_bytes - 1) // self.packet_size_bytes
+        recv = packet_keep[first_packet] & packet_keep[last_packet]
 
         recv_idx = sent_idx[recv]
 
@@ -384,7 +396,6 @@ class CosDHMarkovByteChannel(nn.Module):
 
         out = msg * keep_mask
 
-        tx_packets = int(math.ceil(consumed_bytes / float(max(self.packet_size_bytes, 1)))) if consumed_bytes > 0 else 0
         received_payload_bytes = int(recv_idx.numel() * cell_bytes)
         rx_packets = int(math.ceil(received_payload_bytes / float(max(self.packet_size_bytes, 1)))) if received_payload_bytes > 0 else 0
 

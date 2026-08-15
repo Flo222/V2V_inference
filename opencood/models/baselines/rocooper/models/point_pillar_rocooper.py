@@ -36,6 +36,7 @@ from opencood.models.common.sub_modules.downsample_conv import DownsampleConv
 from opencood.models.common.sub_modules.naive_compress import NaiveCompressor
 
 from opencood.models.baselines.rocooper.components.rocooper_comm import RoCooperComm
+from opencood.models.baselines.rocooper.components.rocooper_markov_comm import RoCooperMarkovComm
 from opencood.models.baselines.rocooper.rocooper_fuse import RoCooperFusion
 
 
@@ -142,7 +143,14 @@ class PointPillarRocooper(nn.Module):
         # ------------------------------------------------------------------
         # This module should keep ego features lossless when impair_ego=False.
         rocooper_comm_args = args.get("rocooper_comm", {})
-        self.comm_module = RoCooperComm(rocooper_comm_args)
+        markov_cfg = rocooper_comm_args.get("markov_channel", {}) or {}
+        channel_mode = str(
+            rocooper_comm_args.get("channel_state_mode", "fixed")
+        ).strip().lower()
+        if channel_mode == "markov" or bool(markov_cfg.get("enabled", False)):
+            self.comm_module = RoCooperMarkovComm(rocooper_comm_args)
+        else:
+            self.comm_module = RoCooperComm(rocooper_comm_args)
 
         # ------------------------------------------------------------------
         # 5. RoCooper fusion module

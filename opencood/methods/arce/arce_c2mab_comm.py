@@ -97,6 +97,10 @@ from opencood.methods.arce.c2mab_common import (
 
 class ARCEC2MABComm:
 
+    def set_channel_manager(self, channel_manager) -> None:
+        """Forward experiment-level channel injection to the transport executor."""
+        self.executor.set_channel_manager(channel_manager)
+
     def __init__(self, cfg: Optional[Dict[str, Any]] = None):
         self.arce_cfg = _extract_arce_cfg(cfg or {})
 

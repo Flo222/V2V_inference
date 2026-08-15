@@ -16,6 +16,10 @@ import torch.optim as optim
 import timm
 
 from opencood.models.registry import resolve_model_module
+from opencood.communication.experiment_channel import (
+    build_experiment_channel_manager,
+    inject_experiment_channel_manager,
+)
 
 def load_saved_model(saved_path, model):
     """
@@ -134,6 +138,14 @@ def create_model(hypes):
                                                        target_model_name))
         exit(0)
     instance = model(backbone_config)
+    manager = build_experiment_channel_manager(hypes)
+    adapter_count = inject_experiment_channel_manager(instance, manager)
+    env_cfg = (hypes or {}).get("communication_environment", {}) or {}
+    if manager is not None and bool(env_cfg.get("strict", True)) and adapter_count <= 0:
+        raise RuntimeError(
+            "communication_environment.strict is enabled, but the model "
+            "does not expose a set_channel_manager() adapter."
+        )
     return instance
 
 

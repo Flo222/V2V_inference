@@ -4,7 +4,7 @@ Channel manager for ARCE communication simulation.
 This module provides one unified interface for:
 
 1. Fixed Good / Medium / Bad channel profile.
-2. Gilbert-Elliott packet loss sampling.
+2. Bernoulli packet loss sampling.
 3. Size-bandwidth-plus-jitter latency estimation.
 
 It does NOT:
@@ -25,10 +25,10 @@ Those operations are handled by:
 from __future__ import annotations
 
 import copy
+import hashlib
 from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
-import hashlib
 
 def _stable_seed(*items):
     s = "|".join(map(str, items))
@@ -43,7 +43,6 @@ from opencood.communication.channel import (
 )
 
 from opencood.communication.channel.fixed_channel import FixedChannel
-from opencood.communication.channel.gilbert_elliott import GilbertElliott
 from opencood.communication.channel.latency_model import LatencyModel
 
 
@@ -145,19 +144,24 @@ class ChannelManager:
             self.channel_cfg.get("mode", "fixed")
         ).strip().lower()
 
-        if self.mode != "fixed":
+        if self.mode not in ("fixed", "markov"):
             raise NotImplementedError(
-                f"ChannelManager currently supports only mode='fixed', "
+                f"ChannelManager supports mode='fixed' or mode='markov', "
                 f"got mode='{self.mode}'."
             )
 
         self.fixed_channel = FixedChannel(self.channel_cfg)
         self.latency_model = LatencyModel(cfg)
 
-        self._ge_models: Dict[str, GilbertElliott] = {}
-        self._build_ge_models()
-
-        self.loss_model = self.channel_cfg.get("loss_model", "ge")
+        configured_loss_model = str(
+            self.channel_cfg.get("loss_model", "bernoulli")
+        ).strip().lower()
+        if configured_loss_model != "bernoulli":
+            raise ValueError(
+                "ChannelManager supports only loss_model='bernoulli'; "
+                "Gilbert-Elliott support has been removed."
+            )
+        self.loss_model = "bernoulli"
 
         self.bernoulli_loss_rates = {
             "good": 0.05,
@@ -178,60 +182,111 @@ class ChannelManager:
             self.channel_cfg.get("fixed_delay_ms", {})
         )
 
-    def _build_ge_models(self) -> None:
-        """
-        Build one Gilbert-Elliott model per channel state.
-
-        Each GilbertElliott model itself maintains independent states
-        for different link_id values.
-        """
-        self._ge_models.clear()
-
-        for idx, state in enumerate(VALID_CHANNEL_STATES):
-            profile = self.fixed_channel.get_profile(state)
-            ge_cfg = profile["ge"]
-
-            # Offset seed by state index so that Good/Medium/Bad profiles
-            # do not share exactly the same random sequence.
-            ge_seed = int(self.seed + 1009 * (idx + 1))
-
-            self._ge_models[state] = GilbertElliott(
-                cfg=ge_cfg,
-                seed=ge_seed,
-                init_state=ge_cfg.get("init_state", "G"),
-                transition_before_loss=ge_cfg.get(
-                    "transition_before_loss",
-                    True,
-                ),
-                per_link_state=ge_cfg.get("per_link_state", True),
-                per_link_rng=ge_cfg.get("per_link_rng", True),
+        # Link-level Good/Medium/Bad evolution belongs here, rather than in
+        # individual baseline wrappers.  A state is advanced at most once for
+        # one (link, frame) pair so multi-scale messages share one physical
+        # channel state and budget context.
+        self.markov_states = tuple(VALID_CHANNEL_STATES)
+        self.markov_initial_state = normalize_channel_state(
+            self.channel_cfg.get(
+                "initial_state",
+                self.channel_cfg.get("fixed_state", CHANNEL_STATE_MEDIUM),
             )
+        )
+        self.markov_transition = self._build_markov_transition()
+        self._markov_state_by_link: Dict[str, str] = {}
+        self._markov_last_frame_by_link: Dict[str, Any] = {}
+        self._markov_rng_by_link: Dict[str, torch.Generator] = {}
+
+    def _build_markov_transition(self) -> Dict[str, Tuple[float, ...]]:
+        """Normalize a Good/Medium/Bad transition matrix once."""
+        default = {
+            "good": {"good": 0.85, "medium": 0.13, "bad": 0.02},
+            "medium": {"good": 0.10, "medium": 0.80, "bad": 0.10},
+            "bad": {"good": 0.03, "medium": 0.17, "bad": 0.80},
+        }
+        raw = self.channel_cfg.get("transition_matrix", default) or default
+        result: Dict[str, Tuple[float, ...]] = {}
+        for index, state in enumerate(self.markov_states):
+            row = raw.get(state, raw.get(state.upper(), default[state])) \
+                if isinstance(raw, dict) else raw[index]
+            if isinstance(row, dict):
+                values = [float(row.get(dst, 0.0)) for dst in self.markov_states]
+            else:
+                values = [float(value) for value in row]
+            if len(values) != len(self.markov_states) or sum(values) <= 0.0:
+                raise ValueError(
+                    "Each ChannelManager Markov transition row must provide "
+                    "positive probabilities for good, medium and bad."
+                )
+            total = float(sum(values))
+            result[state] = tuple(value / total for value in values)
+        return result
+
+    @staticmethod
+    def _markov_link_key(link_id: Any) -> str:
+        return repr(link_id)
+
+    def _advance_markov_state(self, link_id: Any, frame_id: Optional[Any]) -> str:
+        key = self._markov_link_key(link_id)
+        if key not in self._markov_state_by_link:
+            self._markov_state_by_link[key] = self.markov_initial_state
+            self._markov_last_frame_by_link[key] = frame_id
+            return self.markov_initial_state
+        if frame_id is not None and self._markov_last_frame_by_link.get(key) == frame_id:
+            return self._markov_state_by_link[key]
+        generator = self._markov_rng_by_link.get(key)
+        if generator is None:
+            generator = torch.Generator(device="cpu")
+            generator.manual_seed(_stable_seed(self.seed, "channel_state", key))
+            self._markov_rng_by_link[key] = generator
+        current = self._markov_state_by_link[key]
+        probabilities = torch.tensor(
+            self.markov_transition[current], dtype=torch.float32
+        )
+        next_index = int(torch.multinomial(probabilities, 1, generator=generator).item())
+        next_state = self.markov_states[next_index]
+        self._markov_state_by_link[key] = next_state
+        self._markov_last_frame_by_link[key] = frame_id
+        return next_state
 
     def reset(self, link_id: Any = None) -> None:
         """
-        Reset all GE models.
+        Reset latency and Markov state for all links or one link.
 
         Parameters
         ----------
         link_id : any, optional
             If None, reset all link states.
-            If not None, reset only this link in every GE model.
+            If not None, reset only this link's Markov and latency state.
         """
-        for ge in self._ge_models.values():
-            ge.reset(link_id=link_id)
-
         self.latency_model.reset_rng(link_id=link_id)
+        if link_id is None:
+            self._markov_state_by_link.clear()
+            self._markov_last_frame_by_link.clear()
+            self._markov_rng_by_link.clear()
+        else:
+            key = self._markov_link_key(link_id)
+            self._markov_state_by_link.pop(key, None)
+            self._markov_last_frame_by_link.pop(key, None)
+            self._markov_rng_by_link.pop(key, None)
 
     def set_fixed_state(self, state: str) -> None:
         """
         Change fixed Good / Medium / Bad channel state at runtime.
         """
+        state = normalize_channel_state(state)
         self.fixed_channel.set_fixed_state(state)
+        if self.mode == "markov":
+            self.markov_initial_state = state
+            self.reset()
 
     def get_current_state(self) -> str:
         """
         Return current fixed channel state.
         """
+        if self.mode == "markov":
+            return self.markov_initial_state
         return self.fixed_channel.fixed_state
 
     def get_profile(self, state: Optional[str] = None) -> Dict[str, Any]:
@@ -251,7 +306,7 @@ class ChannelManager:
                 {
                     "state_name": str,
                     "bandwidth_mbps": float,
-                    "ge": dict,
+                    "packet_loss_rate": float,
                     "jitter_ms": tuple
                 }
         """
@@ -285,6 +340,8 @@ class ChannelManager:
         dict
             Channel profile with metadata.
         """
+        if state is None and self.mode == "markov":
+            state = self._advance_markov_state(link_id=link_id, frame_id=frame_id)
         profile = self.fixed_channel.step(
             frame_id=frame_id,
             link_id=link_id,
@@ -292,20 +349,6 @@ class ChannelManager:
         )
 
         return profile
-
-    def _get_ge_model(self, state: Optional[str] = None) -> Tuple[str, GilbertElliott]:
-        """
-        Get GE model for a channel state.
-        """
-        if state is None:
-            state = self.get_current_state()
-
-        state = normalize_channel_state(state)
-
-        if state not in self._ge_models:
-            raise KeyError(f"No GE model found for state '{state}'.")
-
-        return state, self._ge_models[state]
 
     def sample_packet_loss(
         self,
@@ -317,7 +360,7 @@ class ChannelManager:
         return_info: bool = True,
     ):
         """
-        Sample GE packet loss mask.
+        Sample a deterministic Bernoulli packet-loss mask.
 
         Parameters
         ----------
@@ -351,74 +394,40 @@ class ChannelManager:
             False means packet received.
 
         info : dict, optional
-            Channel + GE sampling metadata.
+            Bernoulli sampling metadata.
         """
 
         device = device or torch.device("cpu")
-
-        if state_name is None:
-            profile = self.step(link_id=link_id)
-            state_name = profile.state_name
-
-        state_name = str(state_name).lower()
-
-        if self.loss_model == "bernoulli":
-            p = float(self.bernoulli_loss_rates[state_name])
-
-            g = torch.Generator(device="cpu")
-            g.manual_seed(_stable_seed(self.seed, "bernoulli", link_id, frame_id, state_name))
-
-            loss_mask_cpu = torch.rand((num_packets,), generator=g) < p
-            loss_mask = loss_mask_cpu.to(device=device)
-
-            info = {
-                "model": "bernoulli",
-                "state": state_name,
-                "loss_rate": p,
-                "num_packets": int(num_packets),
-                "num_lost": int(loss_mask.sum().item()),
-            }
-            return loss_mask, info
-
         profile = self.step(frame_id=frame_id, link_id=link_id, state=state)
         state_name = profile["state_name"]
 
-        _, ge_model = self._get_ge_model(state_name)
-
-        result = ge_model.sample_loss_mask(
-            num_packets=num_packets,
-            link_id=link_id,
-            device=device,
-            return_info=return_info,
-        )
-
-        if not return_info:
-            return result
-
-        loss_mask, ge_info = result
-
+        p = float(self.bernoulli_loss_rates.get(
+            state_name, profile.get("packet_loss_rate", 0.0)
+        ))
+        if p < 0.0 or p > 1.0:
+            raise ValueError("Bernoulli packet_loss_rate must be in [0, 1].")
+        g = torch.Generator(device="cpu")
+        g.manual_seed(_stable_seed(self.seed, "bernoulli", link_id, frame_id, state_name))
+        loss_mask = (torch.rand((num_packets,), generator=g) < p).to(device=device)
         info = {
             "frame_id": frame_id,
             "link_id": repr(link_id),
             "channel_mode": self.mode,
             "channel_state": state_name,
+            "model": "bernoulli",
+            "loss_rate": p,
             "bandwidth_mbps": float(profile["bandwidth_mbps"]),
             "jitter_ms_range": tuple(profile["jitter_ms"]),
-            "ge": ge_info,
             "num_packets": int(num_packets),
-            "num_lost": int(ge_info.get("num_lost", int(loss_mask.sum().item()))),
-            "num_received": int(
-                ge_info.get("num_received", int((~loss_mask).sum().item()))
-            ),
+            "num_lost": int(loss_mask.sum().item()),
+            "num_received": int((~loss_mask).sum().item()),
             "empirical_loss": float(
-                ge_info.get(
-                    "empirical_loss",
-                    float(loss_mask.float().mean().item()) if num_packets > 0 else 0.0,
-                )
+                loss_mask.float().mean().item() if num_packets > 0 else 0.0
             ),
-            "expected_loss": float(ge_info.get("expected_loss", 0.0)),
+            "expected_loss": p,
         }
-
+        if not return_info:
+            return loss_mask
         return loss_mask, info
 
     def sample_receive_mask(
@@ -510,26 +519,6 @@ class ChannelManager:
         dict
             Latency metadata.
         """
-        if state_name is None:
-            profile = self.step(link_id=link_id)
-            state_name = profile.state_name
-
-        state_name = str(state_name).lower()
-
-        if self.latency_model_type == "fixed_state_delay":
-            delay_ms = float(self.fixed_delay_ms[state_name])
-            return {
-                "model": "fixed_state_delay",
-                "state": state_name,
-                "num_bytes": int(num_bytes),
-                "bandwidth_mbps": bandwidth_mbps,
-                "transmission_delay_ms": 0.0,
-                "processing_delay_ms": 0.0,
-                "jitter_ms": 0.0,
-                "total_delay_ms": delay_ms,
-                "late": False,
-            }
-            
         if channel_profile is None:
             channel_profile = self.step(
                 frame_id=frame_id,
@@ -538,9 +527,25 @@ class ChannelManager:
             )
         else:
             channel_profile = copy.deepcopy(channel_profile)
-
         state_name = channel_profile["state_name"]
 
+        if self.latency_model_type == "fixed_state_delay":
+            delay_ms = float(self.fixed_delay_ms[state_name])
+            return {
+                "model": "fixed_state_delay",
+                "state": state_name,
+                "num_bytes": int(transmitted_bytes),
+                "bandwidth_mbps": float(
+                    channel_profile["bandwidth_mbps"]
+                    if bandwidth_mbps is None else bandwidth_mbps
+                ),
+                "transmission_delay_ms": 0.0,
+                "processing_delay_ms": 0.0,
+                "jitter_ms": 0.0,
+                "total_delay_ms": delay_ms,
+                "late": False,
+            }
+            
         if bandwidth_mbps is None:
             bandwidth_mbps = float(channel_profile["bandwidth_mbps"])
 
@@ -689,6 +694,49 @@ class ChannelManager:
 
         return budget_info
 
+    def get_frame_budget(
+        self,
+        frame_interval_ms: float,
+        link_id: Any = None,
+        frame_id: Optional[Any] = None,
+        state: Optional[str] = None,
+        packet_size_bytes: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Return one link's physical byte budget for a simulation frame.
+
+        This is the shared budget API for baseline-native payload adapters.
+        It intentionally knows nothing about feature layout or packet contents;
+        adapters decide how to consume the resulting packet-aligned budget.
+        """
+        interval_ms = float(frame_interval_ms)
+        if interval_ms <= 0.0:
+            raise ValueError("frame_interval_ms must be positive")
+        profile = self.step(frame_id=frame_id, link_id=link_id, state=state)
+        raw_budget_bytes = int(
+            float(profile["bandwidth_mbps"]) * 1e6 / 8.0 * interval_ms / 1000.0
+        )
+        packet_size = None if packet_size_bytes is None else int(packet_size_bytes)
+        if packet_size is not None and packet_size <= 0:
+            raise ValueError("packet_size_bytes must be positive when provided")
+        budget_bytes = raw_budget_bytes
+        budget_packets = None
+        if packet_size is not None:
+            budget_packets = max(0, raw_budget_bytes // packet_size)
+            budget_bytes = int(budget_packets * packet_size)
+        return {
+            "frame_id": frame_id,
+            "link_id": repr(link_id),
+            "channel_mode": self.mode,
+            "channel_state": profile["state_name"],
+            "profile": profile,
+            "bandwidth_mbps": float(profile["bandwidth_mbps"]),
+            "frame_interval_ms": interval_ms,
+            "raw_budget_bytes": raw_budget_bytes,
+            "budget_bytes": budget_bytes,
+            "packet_size_bytes": packet_size,
+            "budget_packets": budget_packets,
+        }
+
     def sample_link(
         self,
         num_packets: int,
@@ -723,7 +771,7 @@ class ChannelManager:
                 True means received.
 
         info : dict
-            Combined channel, GE, and latency information.
+            Combined channel, Bernoulli-loss, and latency information.
         """
         profile = self.step(frame_id=frame_id, link_id=link_id, state=state)
 
@@ -764,24 +812,6 @@ class ChannelManager:
 
         return loss_mask, info
 
-    def get_ge_params(self, state: Optional[str] = None) -> Dict[str, float]:
-        """
-        Return GE parameters for a channel state.
-        """
-        state_name, ge_model = self._get_ge_model(state)
-        params = ge_model.get_params()
-        params["channel_state"] = state_name
-        return params
-
-    def get_ge_state_dict(self) -> Dict[str, Dict[str, str]]:
-        """
-        Return current GE states for all channel states and all known links.
-        """
-        return {
-            state: ge_model.get_state_dict()
-            for state, ge_model in self._ge_models.items()
-        }
-
     def get_config(self) -> Dict[str, Any]:
         """
         Export ChannelManager configuration.
@@ -791,10 +821,8 @@ class ChannelManager:
             "seed": int(self.seed),
             "fixed_channel": self.fixed_channel.as_dict(),
             "latency": self.latency_model.get_config(),
-            "ge_params": {
-                state: ge.get_params()
-                for state, ge in self._ge_models.items()
-            },
+            "loss_model": self.loss_model,
+            "bernoulli_loss_rates": dict(self.bernoulli_loss_rates),
         }
 
     def __repr__(self) -> str:

@@ -14,8 +14,6 @@ wild_setting:
   data_size: 1.06
   transmission_speed: 27
   backbone_delay: 10
-  channel_state_markov:
-    enabled: false
 train_params:
   batch_size: 1
   epoches: 20
@@ -199,119 +197,6 @@ model:
       use_vcqi: false
       return_masks: false
       channel_state_mode: markov
-      markov_channel:
-        enabled: true
-        seed: 2026
-        initial_state: medium
-        verbose: false
-        verbose_every: 500
-        states:
-        - good
-        - medium
-        - bad
-        transition_matrix:
-          good:
-          - 0.85
-          - 0.13
-          - 0.02
-          medium:
-          - 0.1
-          - 0.8
-          - 0.1
-          bad:
-          - 0.03
-          - 0.17
-          - 0.8
-        state_params:
-          good:
-            bandwidth_mode: rocooper_native_then_budget
-            bandwidth_mbps: 27.0
-            frame_interval_ms: 100
-            native_compression_policy: auto_to_budget
-            min_native_compression_ratio: 1.0
-            max_native_compression_ratio: 32.0
-            compression_ratio: 1.0
-            fallback_on_exceed: drop
-            packet_loss_mean: 1.0
-            packet_loss_std: 0.0
-            zero_fraction: 0.05
-            delay_mean_ms: 10
-            delay_std_ms: 0
-            max_delay_frames: 0
-            frame_drop_mean: 0.0
-            frame_drop_std: 0.0
-            fading_enabled: false
-          medium:
-            bandwidth_mode: rocooper_native_then_budget
-            bandwidth_mbps: 5.0
-            frame_interval_ms: 100
-            native_compression_policy: auto_to_budget
-            min_native_compression_ratio: 1.0
-            max_native_compression_ratio: 32.0
-            compression_ratio: 1.0
-            fallback_on_exceed: drop
-            packet_loss_mean: 1.0
-            packet_loss_std: 0.0
-            zero_fraction: 0.2
-            delay_mean_ms: 50
-            delay_std_ms: 0
-            max_delay_frames: 0
-            frame_drop_mean: 0.0
-            frame_drop_std: 0.0
-            fading_enabled: false
-          bad:
-            bandwidth_mode: rocooper_native_then_budget
-            bandwidth_mbps: 1.0
-            frame_interval_ms: 100
-            native_compression_policy: auto_to_budget
-            min_native_compression_ratio: 1.0
-            max_native_compression_ratio: 32.0
-            compression_ratio: 1.0
-            fallback_on_exceed: drop
-            packet_loss_mean: 1.0
-            packet_loss_std: 0.0
-            zero_fraction: 0.35
-            delay_mean_ms: 100
-            delay_std_ms: 0
-            max_delay_frames: 1
-            frame_drop_mean: 0.0
-            frame_drop_std: 0.0
-            fading_enabled: false
-      channel_fading:
-        enabled: false
-      network_loss:
-        enabled: true
-        bandwidth_limit:
-          enabled: true
-          mode: rocooper_native_then_budget
-          bandwidth_mbps: 27.0
-          frame_interval_ms: 100
-          native_compression_policy: auto_to_budget
-          min_native_compression_ratio: 1.0
-          max_native_compression_ratio: 32.0
-          compression_ratio: 1.0
-          fallback_on_exceed: drop
-          mean: 1.0
-          std: 0.0
-        packet_loss:
-          enabled: true
-          granularity: block
-          block_size: 4
-          mean: 1.0
-          std: 0.0
-          zero_fraction: 0.05
-        delay:
-          enabled: true
-          mean_ms: 10
-          std_ms: 0
-          frame_interval_ms: 100
-          frame_interval: 100
-          max_delay_frames: 1
-        frame_drop:
-          enabled: false
-          drop_whole_cav_feature: false
-          mean: 0.0
-          std: 0.0
     augmentor:
       enabled: true
       spatial_channel_attention:
@@ -404,3 +289,48 @@ lr_scheduler:
   step_size:
   - 15
   - 50
+communication_environment:
+  enabled: true
+  strict: true
+  seed: 2026
+  channel:
+    mode: markov
+    initial_state: medium
+    frame_interval_ms: 100.0
+    loss_model: bernoulli
+    transition_matrix:
+      good:
+        good: 0.85
+        medium: 0.13
+        bad: 0.02
+      medium:
+        good: 0.1
+        medium: 0.8
+        bad: 0.1
+      bad:
+        good: 0.03
+        medium: 0.17
+        bad: 0.8
+    bernoulli_loss_rates:
+      good: 0.05
+      medium: 0.2
+      bad: 0.35
+    profiles:
+      good:
+        bandwidth_mbps: 27.0
+        packet_loss_rate: 0.05
+        delay_ms: 10.0
+        temporal_source: current
+      medium:
+        bandwidth_mbps: 5.0
+        packet_loss_rate: 0.2
+        delay_ms: 50.0
+        temporal_source: current
+      bad:
+        bandwidth_mbps: 1.0
+        packet_loss_rate: 0.35
+        delay_ms: 100.0
+        temporal_source: previous_frame
+  latency:
+    enabled: true
+    frame_interval_ms: 100.0

@@ -7,13 +7,13 @@ communication states according to a Markov transition matrix.
 """
 
 import copy
-import random
 from collections import Counter
 
 import torch
 import torch.nn as nn
 
 from opencood.models.baselines.rocooper.components.rocooper_comm import RoCooperComm
+from opencood.communication.channel.channel_manager import ChannelManager
 
 
 class RoCooperMarkovComm(nn.Module):
@@ -29,7 +29,6 @@ class RoCooperMarkovComm(nn.Module):
         self.current_state = self.initial_state
 
         self.seed = int(self.markov_cfg.get("seed", 2026))
-        self.rng = random.Random(self.seed)
 
         self.verbose = bool(self.markov_cfg.get("verbose", False))
         self.verbose_every = int(self.markov_cfg.get("verbose_every", 500))
@@ -44,10 +43,33 @@ class RoCooperMarkovComm(nn.Module):
                 "bad": [0.02, 0.18, 0.80],
             }
 
-        self.transition_matrix = transition_matrix
+        state_params = self.markov_cfg.get("state_params", {}) or {}
+        profiles = {}
+        for state in self.states:
+            params = state_params.get(state, {}) or {}
+            profiles[state] = {
+                "bandwidth_mbps": float(params.get("bandwidth_mbps", 27.0)),
+                "packet_loss_rate": float(
+                    params.get("zero_fraction", params.get("packet_loss_mean", 0.15))
+                ),
+                "delay_ms": float(params.get("delay_mean_ms", 0.0)),
+            }
+        self.channel_manager = ChannelManager({
+            "seed": self.seed,
+            "channel": {
+                "mode": "markov",
+                "initial_state": self.initial_state,
+                "transition_matrix": transition_matrix,
+                "profiles": profiles,
+                "loss_model": "bernoulli",
+                "bernoulli_loss_rates": {
+                    state: float(profile["packet_loss_rate"])
+                    for state, profile in profiles.items()
+                },
+            },
+        })
         self.state_modules = nn.ModuleDict()
 
-        state_params = self.markov_cfg.get("state_params", {}) or {}
         for state in self.states:
             cfg = self._make_state_cfg(self.base_cfg, state_params.get(state, {}), state)
             self.state_modules[state] = RoCooperComm(cfg, *args, **kwargs)
@@ -156,28 +178,23 @@ class RoCooperMarkovComm(nn.Module):
         cfg["_markov_fixed_state"] = state_name
         return cfg
 
-    def _next_state(self):
-        if not self.enabled:
-            return self.current_state
-
-        row = self.transition_matrix.get(self.current_state, None)
-        if row is None:
-            self.current_state = self.initial_state
-            row = self.transition_matrix[self.current_state]
-
-        r = self.rng.random()
-        acc = 0.0
-        for state, prob in zip(self.states, row):
-            acc += float(prob)
-            if r <= acc:
-                self.current_state = state
-                return state
-
-        self.current_state = self.states[-1]
-        return self.current_state
+    def set_channel_manager(self, channel_manager) -> None:
+        """Thin adapter injection; native RoCooper transport remains intact."""
+        if not isinstance(channel_manager, ChannelManager):
+            raise TypeError("channel_manager must be a ChannelManager instance")
+        self.channel_manager = channel_manager
+        for module in self.state_modules.values():
+            module.set_channel_manager(channel_manager)
 
     def forward(self, *args, **kwargs):
-        state = self._next_state()
+        if self.enabled:
+            state = self.channel_manager.step(
+                frame_id=self.step,
+                link_id="rocooper_global_channel",
+            )["state_name"]
+            self.current_state = state
+        else:
+            state = self.current_state
         self.step += 1
         self.counter[state] += 1
 
@@ -188,4 +205,11 @@ class RoCooperMarkovComm(nn.Module):
                 self.step, state, dist
             ), flush=True)
 
+        profile = self.channel_manager.get_profile(state)
+        self.state_modules[state].set_channel_context(
+            self.channel_manager,
+            profile,
+            state,
+            self.step - 1,
+        )
         return self.state_modules[state](*args, **kwargs)

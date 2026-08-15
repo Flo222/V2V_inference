@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from opencood.communication.channel.channel_manager import ChannelManager
+
 
 class CosDHMarkovImpair(nn.Module):
     """
@@ -88,23 +90,29 @@ class CosDHMarkovImpair(nn.Module):
         if self.init_state not in self.states:
             self.init_state = self.states[0]
 
-        self._link_state = {}
         self._delay_cache = defaultdict(lambda: deque(maxlen=128))
-
-    def _state_to_idx(self, state):
-        return self.states.index(state)
-
-    def _next_state(self, link_key, device):
-        if link_key not in self._link_state:
-            self._link_state[link_key] = self._state_to_idx(self.init_state)
-
-        cur_idx = self._link_state[link_key]
-        prob = self.transition[cur_idx].to(device)
-
-        nxt_idx = torch.multinomial(prob, num_samples=1).item()
-        self._link_state[link_key] = nxt_idx
-
-        return self.states[nxt_idx]
+        self._frame_index = -1
+        self.channel_manager = ChannelManager({
+            "seed": int(cfg.get("seed", 0)),
+            "channel": {
+                "mode": "markov",
+                "initial_state": self.init_state,
+                "transition_matrix": cfg.get("transition", default_transition),
+                "profiles": {
+                    state: {
+                        "bandwidth_mbps": float(profile["bandwidth_mbps"]),
+                        "packet_loss_rate": float(profile["packet_loss_rate"]),
+                        "delay_slots": int(profile.get("delay_slots", 0)),
+                    }
+                    for state, profile in self.state_cfg.items()
+                },
+                "loss_model": "bernoulli",
+                "bernoulli_loss_rates": {
+                    state: float(profile["packet_loss_rate"])
+                    for state, profile in self.state_cfg.items()
+                },
+            },
+        })
 
     def _get_delayed_feature(self, link_key, current_feat, delay_slots):
         """
@@ -162,7 +170,7 @@ class CosDHMarkovImpair(nn.Module):
         patch_score = F.adaptive_avg_pool2d(energy, patch_grid)
         return patch_score.flatten()
 
-    def _apply_bandwidth_and_loss(self, feat, score_map_one, bandwidth_mbps, packet_loss_rate):
+    def _apply_bandwidth_and_loss(self, feat, score_map_one, budget_bytes, link_key, frame_id):
         """
         feat: [1, C, H, W]
         score_map_one: optional confidence map for this CAV.
@@ -175,13 +183,8 @@ class CosDHMarkovImpair(nn.Module):
         num_patches = ph * pw
 
         patch_bytes = C * ps * ps * self.bytes_per_value
-        bytes_budget = bandwidth_mbps * 1e6 / 8.0 / self.fps
-
-        if bandwidth_mbps <= 0:
-            max_keep = 0
-        else:
-            max_keep = int(bytes_budget // patch_bytes)
-            max_keep = max(0, min(num_patches, max_keep))
+        max_keep = int(budget_bytes // patch_bytes)
+        max_keep = max(0, min(num_patches, max_keep))
 
         # Patch ranking: use CoSDH confidence if available, otherwise feature energy.
         patch_score = self._score_to_patch_score(
@@ -197,11 +200,14 @@ class CosDHMarkovImpair(nn.Module):
             _, topk_idx = torch.topk(patch_score, k=max_keep, largest=True)
             keep_patch[topk_idx] = 1.0
 
-            if packet_loss_rate > 0:
-                receive = (
-                    torch.rand(max_keep, device=feat.device) > float(packet_loss_rate)
-                ).float()
-                keep_patch[topk_idx] = keep_patch[topk_idx] * receive
+            receive = self.channel_manager.sample_receive_mask(
+                num_packets=max_keep,
+                link_id=link_key,
+                frame_id=frame_id,
+                device=feat.device,
+                return_info=False,
+            ).float()
+            keep_patch[topk_idx] = keep_patch[topk_idx] * receive
 
         keep_grid = keep_patch.view(1, 1, ph, pw)
         keep_mask = F.interpolate(keep_grid, size=(H, W), mode="nearest")
@@ -226,6 +232,7 @@ class CosDHMarkovImpair(nn.Module):
         else:
             record_len_list = list(record_len)
 
+        self._frame_index += 1
         start = 0
 
         for b, cav_num in enumerate(record_len_list):
@@ -240,8 +247,13 @@ class CosDHMarkovImpair(nn.Module):
 
                 link_key = f"batch_{b}_cav_{local_idx}"
 
-                state = self._next_state(link_key, x.device)
-                cfg = self.state_cfg[state]
+                budget = self.channel_manager.get_frame_budget(
+                    frame_interval_ms=1000.0 / max(self.fps, 1e-6),
+                    link_id=link_key,
+                    frame_id=self._frame_index,
+                )
+                state = budget["channel_state"]
+                cfg = budget["profile"]
 
                 delay_slots = int(cfg.get("delay_slots", 0))
                 bandwidth_mbps = float(cfg.get("bandwidth_mbps", 0.0))
@@ -261,8 +273,9 @@ class CosDHMarkovImpair(nn.Module):
                 impaired_feat, stat = self._apply_bandwidth_and_loss(
                     delayed_feat,
                     score_one,
-                    bandwidth_mbps=bandwidth_mbps,
-                    packet_loss_rate=packet_loss_rate,
+                    budget_bytes=int(budget["budget_bytes"]),
+                    link_key=link_key,
+                    frame_id=self._frame_index,
                 )
 
                 out[global_idx:global_idx + 1] = impaired_feat

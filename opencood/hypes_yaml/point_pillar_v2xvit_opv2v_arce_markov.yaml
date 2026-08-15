@@ -13,32 +13,6 @@ wild_setting:
   transmission_speed: 27
   backbone_delay: 10
   frame_interval_ms: 100
-  channel_state_markov:
-    enabled: true
-    scope: link
-    seed: 2026
-    initial_state: good
-    states:
-    - good
-    - medium
-    - bad
-    transition_matrix:
-      good:
-        good: 0.85
-        medium: 0.12
-        bad: 0.03
-      medium:
-        good: 0.15
-        medium: 0.7
-        bad: 0.15
-      bad:
-        good: 0.05
-        medium: 0.25
-        bad: 0.7
-    delay_ms:
-      good: 100
-      medium: 200
-      bad: 400
 yaml_parser: load_point_pillar_params
 train_params:
   batch_size: 1
@@ -115,9 +89,6 @@ model:
       link_scope: non_ego
       late_policy: allow
       enable_deadline_drop: false
-      channel:
-        mode: fixed
-        fixed_state: medium
       packetizer:
         mode: patch_max_size
         patch_max_size: 80
@@ -253,3 +224,48 @@ lr_scheduler:
   step_size:
   - 10
   - 15
+communication_environment:
+  enabled: true
+  strict: true
+  seed: 2026
+  channel:
+    mode: markov
+    initial_state: medium
+    frame_interval_ms: 100.0
+    loss_model: bernoulli
+    transition_matrix:
+      good:
+        good: 0.85
+        medium: 0.13
+        bad: 0.02
+      medium:
+        good: 0.1
+        medium: 0.8
+        bad: 0.1
+      bad:
+        good: 0.03
+        medium: 0.17
+        bad: 0.8
+    bernoulli_loss_rates:
+      good: 0.05
+      medium: 0.2
+      bad: 0.35
+    profiles:
+      good:
+        bandwidth_mbps: 27.0
+        packet_loss_rate: 0.05
+        delay_ms: 10.0
+        temporal_source: current
+      medium:
+        bandwidth_mbps: 5.0
+        packet_loss_rate: 0.2
+        delay_ms: 50.0
+        temporal_source: current
+      bad:
+        bandwidth_mbps: 1.0
+        packet_loss_rate: 0.35
+        delay_ms: 100.0
+        temporal_source: previous_frame
+  latency:
+    enabled: true
+    frame_interval_ms: 100.0

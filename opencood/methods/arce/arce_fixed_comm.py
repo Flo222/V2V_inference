@@ -62,6 +62,7 @@ from opencood.methods.arce.priority_block_fec_transport import (
     SCHEDULING_MODE as RAPTORQ_SCHEDULING_MODE,
 )
 from opencood.communication.transport.quantization.feature_quantizer import FeatureQuantizer
+from opencood.communication.channel.channel_manager import ChannelManager
 from opencood.methods.arce.audit import CompressionAuditor, FECRecoveryAuditor
 
 from opencood.communication.transport.fec import (
@@ -383,6 +384,16 @@ class ARCEFixedComm:
                 ],
             ]
         self._markov_state_by_link: Dict[Any, str] = {}
+        shared_channel_cfg = copy.deepcopy(channel_cfg)
+        shared_channel_cfg["mode"] = "markov" if self.markov_enabled else "fixed"
+        if self.markov_enabled:
+            shared_channel_cfg["initial_state"] = self.markov_init_state
+            shared_channel_cfg["transition_matrix"] = self.markov_transition_matrix
+        self.channel_manager = ChannelManager({
+            "seed": self.seed,
+            "channel": shared_channel_cfg,
+            "latency": copy.deepcopy(self.arce_cfg_raw.get("latency", {}) or {}),
+        })
 
         self.prev_feature_cache: Dict[Any, torch.Tensor] = {}
         # Receiver-side cache is separate from the sender-side delay cache.
@@ -630,6 +641,12 @@ class ARCEFixedComm:
         self._markov_state_by_link[key] = current_state
         return current_state
 
+    def set_channel_manager(self, channel_manager: ChannelManager) -> None:
+        """Inject the experiment-owned physical channel without changing ARCE policy."""
+        if not isinstance(channel_manager, ChannelManager):
+            raise TypeError("channel_manager must be a ChannelManager instance")
+        self.channel_manager = channel_manager
+
     def _resolve_active_channel_state(
         self,
         requested_channel_state: Optional[str],
@@ -639,16 +656,26 @@ class ARCEFixedComm:
         if requested_channel_state is not None:
             state = self._normalize_state_name(requested_channel_state)
             self._markov_state_by_link[repr(link_id)] = state
+            self.channel_manager.step(
+                frame_id=frame_id, link_id=link_id, state=state
+            )
             return state, "dataset_link_markov"
 
         if self.markov_enabled:
-            return self._sample_markov_state(link_id=link_id, frame_id=frame_id), "internal_markov"
+            state = self.channel_manager.step(
+                frame_id=frame_id, link_id=link_id
+            )["state_name"]
+            self._markov_state_by_link[repr(link_id)] = state
+            return state, "channel_manager_markov"
 
         global_state = self._markov_state_by_link.get("__global__", None)
         if global_state is not None:
             return self._normalize_state_name(global_state), "fixed_runtime"
 
-        return "medium", "default_medium"
+        state = self.channel_manager.step(
+            frame_id=frame_id, link_id=link_id
+        )["state_name"]
+        return state, "channel_manager_fixed"
 
     def _sample_bernoulli_loss(
         self,
@@ -658,41 +685,14 @@ class ARCEFixedComm:
         frame_id: Optional[int] = None,
         device: Optional[Union[str, torch.device]] = None,
     ) -> Tuple[torch.Tensor, Dict[str, Any]]:
-        device = device or torch.device("cpu")
         state_name = self._normalize_state_name(state_name)
-        plr = float(self.bernoulli_loss_rates[state_name])
-
-        self._loss_call_index += 1
-        seed = _stable_int_seed(
-            self.seed,
-            "bernoulli",
-            repr(link_id),
-            frame_id,
-            self._loss_call_index,
-            state_name,
+        loss_mask, info = self.channel_manager.sample_packet_loss(
+            num_packets=int(num_packets), link_id=link_id, frame_id=frame_id,
+            state=state_name, device=device, return_info=True,
         )
-        g = torch.Generator(device="cpu")
-        g.manual_seed(seed)
-
-        receive_mask_cpu = torch.rand((int(num_packets),), generator=g) < (1.0 - plr)
-        receive_mask = receive_mask_cpu.to(device=device)
-        loss_mask = ~receive_mask
-
-        info = {
-            "model": "bernoulli",
-            "formula": "receive_i ~ Bernoulli(1 - PLR_t)",
-            "frame_id": frame_id,
-            "link_id": repr(link_id),
-            "channel_state": state_name,
-            "plr": float(plr),
-            "receive_prob": float(1.0 - plr),
-            "num_packets": int(num_packets),
-            "num_received": int(receive_mask.sum().item()),
-            "num_lost": int(loss_mask.sum().item()),
-            "empirical_loss": float(loss_mask.float().mean().item())
-            if int(num_packets) > 0
-            else 0.0,
-        }
+        info["formula"] = "receive_i ~ Bernoulli(1 - PLR_t)"
+        info["plr"] = float(self.bernoulli_loss_rates[state_name])
+        info["receive_prob"] = float(1.0 - info["plr"])
         return loss_mask, info
 
     def _estimate_fixed_latency(

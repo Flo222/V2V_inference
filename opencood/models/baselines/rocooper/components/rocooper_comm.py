@@ -44,6 +44,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from opencood.communication.channel.channel_manager import ChannelManager
+
 
 TensorOrNone = Optional[torch.Tensor]
 
@@ -157,6 +159,39 @@ class RoCooperComm(nn.Module):
         # Delay history queue.
         # Each item is a detached feature tensor from a previous forward pass.
         self._history_queue: List[torch.Tensor] = []
+
+        # Set only by the experiment-level adapter.  Keeping this optional
+        # preserves legacy checkpoints, while new experiments take all
+        # physical parameters from ChannelManager rather than this baseline.
+        self.channel_manager: Optional[ChannelManager] = None
+        self._public_channel_profile: Optional[Dict[str, Any]] = None
+        self._public_channel_state: Optional[str] = None
+        self._public_channel_frame_id: Optional[int] = None
+
+    def set_channel_manager(self, channel_manager: ChannelManager) -> None:
+        """Receive the experiment-owned physical channel (no reset here)."""
+        if not isinstance(channel_manager, ChannelManager):
+            raise TypeError("channel_manager must be a ChannelManager instance")
+        self.channel_manager = channel_manager
+        # Fading and frame-drop are RoCooper-specific disturbance models, not
+        # part of the shared physical channel contract.  Disable them once an
+        # experiment manager is injected so every varying condition comes
+        # from the public bandwidth/loss/delay profile.
+        self.channel_enabled = False
+        self.frame_drop_cfg["enabled"] = False
+
+    def set_channel_context(
+        self,
+        channel_manager: ChannelManager,
+        profile: Dict[str, Any],
+        state_name: str,
+        frame_id: int,
+    ) -> None:
+        """Set the public profile selected by the thin RoCooper adapter."""
+        self.set_channel_manager(channel_manager)
+        self._public_channel_profile = dict(profile)
+        self._public_channel_state = str(state_name)
+        self._public_channel_frame_id = int(frame_id)
 
     # ------------------------------------------------------------------
     # Public forward
@@ -572,6 +607,7 @@ class RoCooperComm(nn.Module):
         impair_mask: torch.Tensor,
     ) -> Tuple[torch.Tensor, Dict[str, Any]]:
         cfg = self.bandwidth_cfg
+        public_profile = self._public_channel_profile
         enabled = self.network_enabled and bool(cfg.get("enabled", False))
 
         info: Dict[str, Any] = {
@@ -592,6 +628,22 @@ class RoCooperComm(nn.Module):
             self._as_float(cfg.get("compression_ratio", 1.0), 1.0),
         )
         mode = str(cfg.get("mode", "resolution_reduction"))
+
+        # Under the public environment the per-frame byte budget is derived
+        # solely from its bandwidth profile.  The original RoCooper operation
+        # (spatial down/up-sampling) remains the payload codec.
+        if public_profile is not None:
+            bandwidth_mbps = max(0.0, float(public_profile["bandwidth_mbps"]))
+            frame_interval_ms = max(
+                1e-6,
+                float(self.channel_manager.channel_cfg.get("frame_interval_ms", 100.0)),
+            )
+            budget_bytes = bandwidth_mbps * 1_000_000.0 / 8.0 * frame_interval_ms / 1000.0
+            payload_bytes = float(x[0].numel() * x.element_size()) if x.shape[0] else 0.0
+            compression_ratio = max(1.0, payload_bytes / max(budget_bytes, 1.0))
+            mean, std = 1.0, 0.0
+            info["bandwidth_mbps"] = bandwidth_mbps
+            info["frame_budget_bytes"] = budget_bytes
 
         if compression_ratio <= 1.0:
             info["bandwidth_compression_ratio"] = compression_ratio
@@ -805,6 +857,7 @@ class RoCooperComm(nn.Module):
         impair_mask: torch.Tensor,
     ) -> Tuple[torch.Tensor, Dict[str, Any]]:
         cfg = self.packet_cfg
+        public_profile = self._public_channel_profile
         enabled = self.network_enabled and bool(cfg.get("enabled", False))
 
         info: Dict[str, Any] = {
@@ -827,17 +880,23 @@ class RoCooperComm(nn.Module):
         num_cav, _, height, width = x.shape
         device = x.device
 
-        probs = self._sample_normal_clamped(
-            mean=mean,
-            std=std,
-            shape=(num_cav,),
-            device=device,
-            min_value=0.0,
-            max_value=1.0,
-        )
-
-        event_mask = torch.rand(num_cav, device=device) < probs
-        event_mask = event_mask & impair_mask
+        if public_profile is None:
+            probs = self._sample_normal_clamped(
+                mean=mean,
+                std=std,
+                shape=(num_cav,),
+                device=device,
+                min_value=0.0,
+                max_value=1.0,
+            )
+            event_mask = (torch.rand(num_cav, device=device) < probs) & impair_mask
+        else:
+            # A public loss sample is taken below for every transmitted
+            # feature block.  Do not make a second baseline-private event.
+            mean = float(public_profile.get("packet_loss_rate", 0.0))
+            std = 0.0
+            zero_fraction = 1.0
+            event_mask = impair_mask.clone()
 
         if not event_mask.any() or zero_fraction <= 0:
             return x, info
@@ -909,9 +968,19 @@ class RoCooperComm(nn.Module):
                     dtype=x.dtype,
                 )
 
-                perm = torch.randperm(num_blocks, device=device)
-                drop_blocks = perm[:num_drop]
-                block_mask.view(-1)[drop_blocks] = 0
+                if public_profile is None:
+                    perm = torch.randperm(num_blocks, device=device)
+                    drop_blocks = perm[:num_drop]
+                    block_mask.view(-1)[drop_blocks] = 0
+                else:
+                    loss_mask, _ = self.channel_manager.sample_packet_loss(
+                        num_packets=num_blocks,
+                        link_id=("rocooper", int(idx)),
+                        frame_id=self._public_channel_frame_id,
+                        state=self._public_channel_state,
+                        device=device,
+                    )
+                    block_mask.view(-1)[loss_mask] = 0
 
                 pixel_mask = block_mask.repeat_interleave(
                     block_size,
@@ -952,6 +1021,7 @@ class RoCooperComm(nn.Module):
         impair_mask: torch.Tensor,
     ) -> Tuple[torch.Tensor, Dict[str, Any]]:
         cfg = self.delay_cfg
+        public_profile = self._public_channel_profile
         enabled = self.network_enabled and bool(cfg.get("enabled", False))
 
         info: Dict[str, Any] = {
@@ -974,6 +1044,10 @@ class RoCooperComm(nn.Module):
             0,
             self._as_int(cfg.get("max_delay_frames", 3), 3),
         )
+        if public_profile is not None:
+            mean_ms = max(0.0, float(public_profile.get("delay_ms", 0.0)))
+            std_ms = 0.0
+            max_delay_frames = max(0, int(math.ceil(mean_ms / frame_interval_ms)))
 
         # Push current impaired feature first.
         # For delay=1, we will fetch the previous element in the queue.
@@ -1043,6 +1117,15 @@ class RoCooperComm(nn.Module):
             0,
             self._as_int(self.delay_cfg.get("max_delay_frames", 3), 3),
         )
+        if self._public_channel_profile is not None:
+            frame_interval_ms = max(
+                1e-6,
+                float(self.channel_manager.channel_cfg.get("frame_interval_ms", 100.0)),
+            )
+            max_delay_frames = max(
+                0,
+                int(math.ceil(float(self._public_channel_profile.get("delay_ms", 0.0)) / frame_interval_ms)),
+            )
         max_len = max_delay_frames + 1
 
         self._history_queue.append(x.detach())

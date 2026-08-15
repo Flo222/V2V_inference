@@ -28,14 +28,14 @@ fusion:
 preprocess:
   core_method: SpVoxelPreprocessor
   args:
-    voxel_size: &voxel_size
+    voxel_size: &id003
     - 0.4
     - 0.4
     - 30
     max_points_per_voxel: 32
     max_voxel_train: 64000
     max_voxel_test: 640000
-  cav_lidar_range: &cav_lidar_range
+  cav_lidar_range: &id001
   - -102.4
   - -38.4
   - -15
@@ -43,7 +43,7 @@ preprocess:
   - 38.4
   - 15
   num_class: 3
-  anchor_generator_config: &anchor_generator_config
+  anchor_generator_config: &id002
   - class_name: vehicle
     anchor_sizes:
     - - 3.9
@@ -100,11 +100,11 @@ data_augment:
   - 1.05
 postprocess:
   core_method: VoxelPostprocessorV2XReal
-  gt_range: *cav_lidar_range
+  gt_range: *id001
   anchor_args:
-    cav_lidar_range: *cav_lidar_range
+    cav_lidar_range: *id001
     num: 2
-    anchor_generator_config: *anchor_generator_config
+    anchor_generator_config: *id002
   target_args:
     score_threshold: 0.2
   order: hwl
@@ -113,8 +113,8 @@ postprocess:
 model:
   core_method: point_pillar_cosdh_markov_v2xreal
   args:
-    voxel_size: *voxel_size
-    lidar_range: *cav_lidar_range
+    voxel_size: *id003
+    lidar_range: *id001
     anchor_number: 2
     anchor_num: 2
     num_class: 3
@@ -152,7 +152,7 @@ model:
       - 128
       - 128
       - 128
-      voxel_size: *voxel_size
+      voxel_size: *id003
     feat_dim:
     - 64
     - 128
@@ -185,42 +185,7 @@ model:
         bytes_per_value: 4
         zero_fill_missing: true
       selection_policy: random
-      states:
-      - good
-      - medium
-      - bad
-      initial_state: medium
-      transition_matrix:
-        good:
-          good: 0.85
-          medium: 0.13
-          bad: 0.02
-        medium:
-          good: 0.10
-          medium: 0.80
-          bad: 0.10
-        bad:
-          good: 0.03
-          medium: 0.17
-          bad: 0.80
-      state_profiles:
-        good:
-          bandwidth_mbps: 27.0
-          packet_loss_rate: 0.05
-          delay_ms: 10.0
-          temporal_source: current
-        medium:
-          bandwidth_mbps: 5.0
-          packet_loss_rate: 0.20
-          delay_ms: 50.0
-          temporal_source: current
-        bad:
-          bandwidth_mbps: 1.0
-          packet_loss_rate: 0.35
-          delay_ms: 100.0
-          temporal_source: previous_frame
       verbose: false
-    # Late dense prediction maps also go through Markov damage.
     cosdh_late_markov:
       enabled: true
       share_profile_with_intermediate: true
@@ -243,3 +208,48 @@ lr_scheduler:
   step_size:
   - 15
   - 50
+communication_environment:
+  enabled: true
+  strict: true
+  seed: 2026
+  channel:
+    mode: markov
+    initial_state: medium
+    frame_interval_ms: 100.0
+    loss_model: bernoulli
+    transition_matrix:
+      good:
+        good: 0.85
+        medium: 0.13
+        bad: 0.02
+      medium:
+        good: 0.1
+        medium: 0.8
+        bad: 0.1
+      bad:
+        good: 0.03
+        medium: 0.17
+        bad: 0.8
+    bernoulli_loss_rates:
+      good: 0.05
+      medium: 0.2
+      bad: 0.35
+    profiles:
+      good:
+        bandwidth_mbps: 27.0
+        packet_loss_rate: 0.05
+        delay_ms: 10.0
+        temporal_source: current
+      medium:
+        bandwidth_mbps: 5.0
+        packet_loss_rate: 0.2
+        delay_ms: 50.0
+        temporal_source: current
+      bad:
+        bandwidth_mbps: 1.0
+        packet_loss_rate: 0.35
+        delay_ms: 100.0
+        temporal_source: previous_frame
+  latency:
+    enabled: true
+    frame_interval_ms: 100.0
