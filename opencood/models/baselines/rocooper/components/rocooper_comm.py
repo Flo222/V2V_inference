@@ -167,6 +167,9 @@ class RoCooperComm(nn.Module):
         self._public_channel_profile: Optional[Dict[str, Any]] = None
         self._public_channel_state: Optional[str] = None
         self._public_channel_frame_id: Optional[int] = None
+        # Append-only audit stream.  The normal ``comm_info`` remains the
+        # frame-local baseline interface; this export is read-only metadata.
+        self.records: List[Dict[str, Any]] = []
 
     def set_channel_manager(self, channel_manager: ChannelManager) -> None:
         """Receive the experiment-owned physical channel (no reset here)."""
@@ -192,6 +195,12 @@ class RoCooperComm(nn.Module):
         self._public_channel_profile = dict(profile)
         self._public_channel_state = str(state_name)
         self._public_channel_frame_id = int(frame_id)
+
+    def get_records(self) -> List[Dict[str, Any]]:
+        return list(self.records)
+
+    def reset_records(self) -> None:
+        self.records = []
 
     # ------------------------------------------------------------------
     # Public forward
@@ -311,6 +320,14 @@ class RoCooperComm(nn.Module):
             int(r.get("transmitted_wire_bytes", 0)) for r in wire_records
         ))
         comm_info["received_wire_bytes"] = None
+        for wire_record in wire_records:
+            audit_record = dict(wire_record)
+            audit_record["state"] = (
+                self._public_channel_state
+                or audit_record.get("state", "rocooper_configured_channel")
+            )
+            audit_record["frame_id"] = self._public_channel_frame_id
+            self.records.append(audit_record)
 
         # --------------------------------------------------------------
         # 2. Wireless channel fading + AWGN

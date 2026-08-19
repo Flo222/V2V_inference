@@ -11,6 +11,34 @@ import math
 import numpy as np
 
 
+def _loader_with_float_resolver(base_loader=yaml.SafeLoader):
+    """Create an isolated loader class for each call.
+
+    Dataset samples are loaded thousands of times in a single evaluation.
+    Registering resolvers on ``yaml.Loader`` mutates PyYAML's process-global
+    class and can corrupt parser state after repeated loads.  A short-lived
+    subclass keeps the OpenCOOD numeric resolver without leaking it between
+    samples.
+    """
+    # Dataset annotations are plain YAML and use SafeLoader.  A few legacy
+    # experiment configs intentionally contain ``!!python/...`` NumPy tags,
+    # so they request an equally isolated compatibility loader below.
+    class OpenCOODYamlLoader(base_loader):
+        pass
+
+    OpenCOODYamlLoader.add_implicit_resolver(
+        u'tag:yaml.org,2002:float',
+        re.compile(u'''^(?:
+         [-+]?(?:[0-9][0-9_]*)\\.[0-9_]*(?:[eE][-+]?[0-9]+)?
+        |[-+]?(?:[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)
+        |\\.[0-9_]+(?:[eE][-+][0-9]+)?
+        |[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\\.[0-9_]*
+        |[-+]?\\.(?:inf|Inf|INF)
+        |\\.(?:nan|NaN|NAN))$''', re.X),
+        list(u'-+0123456789.'))
+    return OpenCOODYamlLoader
+
+
 def load_yaml(file, opt=None):
     """
     Load yaml file and return a dictionary.
@@ -30,19 +58,13 @@ def load_yaml(file, opt=None):
     if opt and opt.model_dir:
         file = os.path.join(opt.model_dir, 'config.yaml')
 
-    stream = open(file, 'r')
-    loader = yaml.Loader
-    loader.add_implicit_resolver(
-        u'tag:yaml.org,2002:float',
-        re.compile(u'''^(?:
-         [-+]?(?:[0-9][0-9_]*)\\.[0-9_]*(?:[eE][-+]?[0-9]+)?
-        |[-+]?(?:[0-9][0-9_]*)(?:[eE][-+]?[0-9]+)
-        |\\.[0-9_]+(?:[eE][-+][0-9]+)?
-        |[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\\.[0-9_]*
-        |[-+]?\\.(?:inf|Inf|INF)
-        |\\.(?:nan|NaN|NAN))$''', re.X),
-        list(u'-+0123456789.'))
-    param = yaml.load(stream, Loader=loader)
+    with open(file, 'r') as stream:
+        content = stream.read()
+    # Preserve compatibility with the historical, serialized NumPy objects
+    # in a small set of sweep configs.  The normal (and all dataset-annotation)
+    # path remains isolated SafeLoader and cannot inherit global Loader state.
+    base_loader = yaml.Loader if '!!python/' in content else yaml.SafeLoader
+    param = yaml.load(content, Loader=_loader_with_float_resolver(base_loader))
     if "yaml_parser" in param:
         param = eval(param["yaml_parser"])(param)
 

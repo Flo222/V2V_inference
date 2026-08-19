@@ -122,6 +122,10 @@ class CosDHMarkovByteChannel(nn.Module):
         self._delay_cache = defaultdict(lambda: deque(maxlen=8))
 
         self.latest_info = []
+        # Append-only standard audit interface.  ``latest_info`` remains
+        # frame-local for the CoSDH runtime, while ``records`` lets a generic
+        # evaluator collect sender->ego wire records across frames.
+        self.records = []
         self._frame_index = -1
         self._current_frame_id = None
 
@@ -161,6 +165,12 @@ class CosDHMarkovByteChannel(nn.Module):
     def set_channel_manager(self, channel_manager) -> None:
         """Thin adapter injection; CoSDH keeps its own message semantics."""
         self.channel_manager = channel_manager
+
+    def get_records(self):
+        return list(self.records)
+
+    def reset_records(self):
+        self.records = []
 
     def start_frame(self, frame_id=None, link_key_aliases=None):
         """Start a new inference frame/session.
@@ -490,8 +500,10 @@ class CosDHMarkovByteChannel(nn.Module):
                 out[global_idx] = impaired_msg
 
                 info = {
+                    "frame_id": self._current_frame_id,
                     "batch": b,
                     "cav": local_idx,
+                    "sender_id": local_idx,
                     "link_key": link_key,
                     "state": session["state"],
                     "bandwidth_mbps": session["bandwidth_mbps"],
@@ -500,6 +512,7 @@ class CosDHMarkovByteChannel(nn.Module):
                 }
                 info.update(stat)
                 self.latest_info.append(info)
+                self.records.append(dict(info))
 
                 if self.verbose:
                     print(

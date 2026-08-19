@@ -13,6 +13,8 @@ import shutil
 import torch
 import torch.optim as optim
 
+from opencood.models.registry import resolve_model_module
+
 def backup_script(full_path, folders_to_save=["models", "data_utils", "utils", "loss"]):
     target_folder = os.path.join(full_path, 'scripts')
     if not os.path.exists(target_folder):

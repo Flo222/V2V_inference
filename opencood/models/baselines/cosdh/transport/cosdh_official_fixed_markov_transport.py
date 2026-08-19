@@ -69,6 +69,9 @@ class CosDHOfficialFixedMarkovTransport(object):
 
         self._frame_started = False
         self.latest_info = {}
+        # ``_link_records`` is deliberately reset per model forward.  Keep a
+        # separate append-only audit stream for generic evaluators.
+        self.records = []
         self.start_frame()
 
     @staticmethod
@@ -116,6 +119,12 @@ class CosDHOfficialFixedMarkovTransport(object):
         self._link_records = []
         self._frame_started = True
         self.latest_info = self._build_latest_info()
+
+    def get_records(self):
+        return list(self.records)
+
+    def reset_records(self):
+        self.records = []
 
     def bind_ego_context(self, record_len, link_key_aliases, data_dict):
         """Bind ego metadata without erasing candidates prepared in inference."""
@@ -470,6 +479,7 @@ class CosDHOfficialFixedMarkovTransport(object):
             offset += int(cav_num)
 
         self._link_records = link_records
+        self.records.extend(copy.deepcopy(link_records))
         self.latest_info = self._build_latest_info()
         return recovered_scales
 

@@ -873,10 +873,15 @@ def latest_model_structures(model, output):
     return structures
 
 
-def run_one_frame(batch_data, model, dataset, baseline):
+def run_one_frame(batch_data, model, dataset, baseline, channel_mode):
     if baseline == "cosdh":
         from opencood.tools import inference_utils_cosdh
         normalized = normalize_cosdh_batch(batch_data, dataset)
+        # Ideal BW only instruments the native ego communication boundary;
+        # no detection post-process is required.  This avoids forcing the
+        # late-fusion postprocessor to consume an audit-only subset of CAVs.
+        if channel_mode == "ideal":
+            return model(normalized["ego"])
         return inference_utils_cosdh.inference_late_fusion(
             normalized, model, dataset
         )
@@ -1155,6 +1160,7 @@ def main():
                     model=model,
                     dataset=dataset,
                     baseline=args.baseline,
+                    channel_mode=args.channel_mode,
                 )
 
                 if ideal_auditor is not None:

@@ -3,6 +3,10 @@
 # completed successfully.  This keeps the two experiments sequential on GPU 0.
 set -u
 
+# The conda activation hook appends to PYTHONPATH.  Initialise it explicitly
+# because nounset would otherwise reject an unset inherited environment.
+export PYTHONPATH="${PYTHONPATH:-}"
+
 PROJECT=/home/server/v2x_projects/V2V_inference
 OPV_DIR=$PROJECT/opencood/logs/point_pillar_v2xvit_opv2v_compression32_perfect_ft
 V2XR_DIR=$PROJECT/opencood/logs/point_pillar_v2xvit_v2xreal_compression32_perfect_ft
