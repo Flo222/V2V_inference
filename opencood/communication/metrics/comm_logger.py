@@ -3,7 +3,7 @@ Communication logger for ARCE / OpenCOOD experiments.
 
 This module writes communication records produced by:
 
-    opencood.methods.arce.arce_fixed_comm.ARCEFixedComm
+    opencood.methods.arce.executors.fixed_executor.ARCEFixedComm
 
 to disk.
 

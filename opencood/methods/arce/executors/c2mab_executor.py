@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from opencood.methods.arce.policies.compact_sparse_cost_helper import (
+from opencood.methods.arce.cost.compact_sparse_cost_helper import (
     estimate_compact_sparse_tokens,
 )
 
-from opencood.methods.arce.policies.payload_transport import (
+from opencood.methods.arce.transport_policy.payload_transport import (
     apply_payload_native_transport_to_arce_cfg,
     compact_sparse_cfg_for_transport,
     is_payload_native_transport,
@@ -16,57 +16,57 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
-from opencood.methods.arce.arce_fixed_comm import ARCEFixedComm
-from opencood.methods.arce.policies.action_space import (
+from opencood.methods.arce.executors.fixed_executor import ARCEFixedComm
+from opencood.methods.arce.policy.c2mab.action_space import (
     PDFARCEAction,
     build_pdf_action_space,
     raw_feature_bytes_fp32,
     budget_bytes_from_bandwidth,
     NO_SEND_ACTION_ID,
 )
-from opencood.methods.arce.policies.context_builder import PDFContextBuilder
-from opencood.methods.arce.policies.c2mab_policy_bank import (
+from opencood.methods.arce.context.context_builder import PDFContextBuilder
+from opencood.methods.arce.policy.c2mab.policy_bank import (
     C2MABPolicyBank,
     C2MABPolicyConfig,
 )
-from opencood.methods.arce.policies.c2mab_executor_config import (
+from opencood.methods.arce.policy.c2mab.executor_config import (
     build_c2mab_executor_cfg,
 )
-from opencood.methods.arce.policies.c2mab_runtime_summary import (
+from opencood.methods.arce.runtime.runtime_summary import (
     summarize_dc2mab_runtime_records,
 )
-from opencood.methods.arce.policies.c2mab_no_send_executor import (
+from opencood.methods.arce.policy.c2mab.no_send_executor import (
     execute_no_send_sender,
 )
-from opencood.methods.arce.policies.c2mab_proposal_builder import build_c2mab_proposals
-from opencood.methods.arce.policies.c2mab_execution_record_builder import (
+from opencood.methods.arce.policy.c2mab.proposal_builder import build_c2mab_proposals
+from opencood.methods.arce.runtime.execution_record_builder import (
     build_budget_consistency,
     enrich_selected_execution_record,
     selected_physical_budget_plan,
     validate_frame_actual_transmitted_bytes,
     selected_transmitted_bytes,
 )
-from opencood.methods.arce.policies.ego_greedy_oracle import (
+from opencood.methods.arce.policy.c2mab.proposal_builder import (
     EgoGreedyKnapsackOracle,
 )
-from opencood.methods.arce.policies.reward import (
+from opencood.methods.arce.reward.reward import (
     RewardBuffer,
     effective_receive_quality,
 )
-from opencood.methods.arce.policies.reward_update_manager import update_pending_rewards
-from opencood.methods.arce.policies.communication_cost_estimator import (
+from opencood.methods.arce.reward.reward_update_manager import update_pending_rewards
+from opencood.methods.arce.cost.communication_cost_estimator import (
     estimate_byte_stream_fec_cost as cce_estimate_byte_stream_fec_cost,
 )
-from opencood.methods.arce.policies.reward_pending_builder import (
+from opencood.methods.arce.reward.reward_pending_builder import (
     build_selected_pending_reward_item,
 )
-from opencood.methods.arce.policies.superarm_record_builder import build_dc2mab_superarm_record
-from opencood.methods.arce.policies.communication_record_utils import (
+from opencood.methods.arce.runtime.superarm_record_builder import build_dc2mab_superarm_record
+from opencood.methods.arce.runtime.communication_record_utils import (
     cache_quality as cru_cache_quality,
     make_no_send_record as cru_make_no_send_record,
     update_cache_quality_from_record as cru_update_cache_quality_from_record,
 )
-from opencood.methods.arce.policies.channel_budget_manager import (
+from opencood.methods.arce.cost.channel_budget_manager import (
     budget_source_scope as cbm_budget_source_scope,
     channel_profile_budget_bytes as cbm_channel_profile_budget_bytes,
     channel_profiles_cfg as cbm_channel_profiles_cfg,
@@ -76,12 +76,12 @@ from opencood.methods.arce.policies.channel_budget_manager import (
     system_budget_bytes as cbm_system_budget_bytes,
     use_channel_profile_budget as cbm_use_channel_profile_budget,
 )
-from opencood.methods.arce.policies.action_adapter import normalize_runtime_action
-from opencood.methods.arce.c2mab_local_confidence import get_cav_confidence
-from opencood.methods.arce.policies.payload_context import build_payload_agent_confidence
+from opencood.methods.arce.transport_policy.action_adapter import normalize_runtime_action
+from opencood.methods.arce.context.local_confidence import get_cav_confidence
+from opencood.methods.arce.context.payload_context import build_payload_agent_confidence
 
 
-from opencood.methods.arce.c2mab_common import (
+from opencood.methods.arce.common import (
     CHANNEL_STATE_ID_TO_NAME,
     DEFAULT_CHANNEL_PROFILES,
     QUANT_RATIO_TO_FP32,

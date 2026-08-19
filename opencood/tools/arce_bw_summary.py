@@ -15,7 +15,7 @@ from opencood.tools import train_utils
 from opencood.tools.arce_eval_runtime import set_deterministic_seed
 from opencood.tools.arce_reward_audit import save_reward_runtime_audit
 from opencood.data_utils.datasets import build_dataset
-from opencood.methods.arce.policies.communication_volume_summary import summarize_bw_records
+from opencood.methods.arce.runtime.communication_volume_summary import summarize_bw_records
 from opencood.tools.arce_bw_breakdown_utils import save_arce_bw_breakdown
 
 

@@ -8,7 +8,7 @@ try:
 except ImportError:  # Python 3.7
     from importlib_metadata import version
 
-from opencood.methods.arce.policies.action_space import build_pdf_action_space
+from opencood.methods.arce.policy.c2mab.action_space import build_pdf_action_space
 from opencood.communication.transport.fec.fec_raptorq import require_raptorq_backend
 
 

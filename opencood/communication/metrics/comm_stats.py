@@ -3,7 +3,7 @@ Communication statistics utilities for ARCE / OpenCOOD experiments.
 
 This module aggregates per-link communication records produced by:
 
-    opencood.methods.arce.arce_fixed_comm.ARCEFixedComm
+    opencood.methods.arce.executors.fixed_executor.ARCEFixedComm
 
 It provides:
     1. online communication metric accumulation;

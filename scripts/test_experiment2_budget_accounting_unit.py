@@ -13,7 +13,7 @@ if REPO_ROOT not in sys.path:
 
 import torch
 
-from opencood.methods.arce.arce_fixed_comm import ARCEFixedComm
+from opencood.methods.arce.executors.fixed_executor import ARCEFixedComm
 
 
 def make_cfg(out_dir: str, mode: str, rho: float, fec_type: str):

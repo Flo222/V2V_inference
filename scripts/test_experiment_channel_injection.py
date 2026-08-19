@@ -10,7 +10,7 @@ from opencood.communication.experiment_channel import (
     validate_experiment_channel_configuration,
 )
 from opencood.hypes_yaml.yaml_utils import load_yaml
-from opencood.methods.arce.arce_c2mab_comm import ARCEC2MABComm
+from opencood.methods.arce.executors.c2mab_executor import ARCEC2MABComm
 from opencood.models.baselines.rocooper.components.rocooper_markov_comm import (
     RoCooperMarkovComm,
 )

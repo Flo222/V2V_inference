@@ -4,10 +4,10 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from opencood.methods.arce.policies.communication_cost_estimator import (
+from opencood.methods.arce.cost.communication_cost_estimator import (
     estimate_byte_stream_fec_cost,
 )
-from opencood.methods.arce.priority_block_fec_transport import (
+from opencood.methods.arce.transport_policy.priority_fec_scheduler import (
     exact_redundancy_group,
     exact_repair_packets_for_block,
     largest_exact_protected_source_block,

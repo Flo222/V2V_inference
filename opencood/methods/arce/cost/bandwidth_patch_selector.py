@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import torch
 import torch.nn.functional as F
 
-from opencood.methods.arce.policies.action_adapter import get_action_field
+from opencood.methods.arce.transport_policy.action_adapter import get_action_field
 from opencood.communication.transport.packetization.size_estimator import (
     quant_mode_to_bits,
     estimate_redundancy_packets,

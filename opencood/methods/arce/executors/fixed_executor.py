@@ -41,23 +41,23 @@ from opencood.methods.arce import (
     extract_arce_cfg,
     should_apply_to_agent,
 )
-from opencood.methods.arce.fixed_policy import ARCEAction, FixedARCEPolicy
-from opencood.methods.arce.random_policy import RandomARCEPolicy
+from opencood.methods.arce.policy.fixed_policy import ARCEAction, FixedARCEPolicy
+from opencood.methods.arce.policy.random_policy import RandomARCEPolicy
 from opencood.communication.transport.packetization.byte_stream_packetizer import ByteStreamPacketizer
-from opencood.methods.arce.policies.payload_transport import (
+from opencood.methods.arce.transport_policy.payload_transport import (
     apply_payload_native_transport_to_arce_cfg,
     is_payload_native_transport,
     normalize_transport_mode,
 )
-from opencood.methods.arce.policies.action_adapter import (
+from opencood.methods.arce.transport_policy.action_adapter import (
     get_action_field,
     normalize_runtime_action,
     runtime_action_as_dict,
 )
-from opencood.methods.arce.policies.spatial_importance import (
+from opencood.methods.arce.context.spatial_importance import (
     ARCESpatialImportance,
 )
-from opencood.methods.arce.priority_block_fec_transport import (
+from opencood.methods.arce.transport_policy.priority_fec_scheduler import (
     PriorityBlockFECTransport,
     SCHEDULING_MODE as RAPTORQ_SCHEDULING_MODE,
 )

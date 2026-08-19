@@ -84,7 +84,7 @@ Those are handled by:
     opencood.communication.transport.fec.*
     opencood.communication.channel.*
     opencood.communication.transport.recovery.*
-    opencood.methods.arce.arce_fixed_comm
+    opencood.methods.arce.executors.fixed_executor
 """
 
 from __future__ import annotations

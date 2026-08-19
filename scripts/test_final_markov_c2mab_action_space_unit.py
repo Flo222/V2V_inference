@@ -8,7 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from opencood.methods.arce.policies.action_space import build_pdf_action_space
+from opencood.methods.arce.policy.c2mab.action_space import build_pdf_action_space
 
 
 def rho_values(actions):

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Tuple
 
-from opencood.methods.arce.policies.discounted_linucb import DiscountedLinUCB
+from opencood.methods.arce.policy.c2mab.discounted_linucb import DiscountedLinUCB
 
 
 @dataclass(frozen=True)

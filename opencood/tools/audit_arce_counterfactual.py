@@ -39,12 +39,12 @@ from opencood.tools.arce_online_eval import (
     _stats,
 )
 from opencood.utils import eval_utils
-from opencood.methods.arce.policies.ap_proxy_features import (
+from opencood.methods.arce.reward.proxy.ap_proxy_features import (
     HEAD_AP_PROXY_FEATURES,
     PAIRED_SPATIAL_AP_PROXY_FEATURES,
     paired_head_ap_proxy_features,
 )
-from opencood.methods.arce.policies.decoded_box_proxy_features import (
+from opencood.methods.arce.reward.proxy.decoded_box_proxy_features import (
     PAIRED_DECODED_MATCH_FEATURES,
     RICH_DECODED_BOX_FEATURES,
     decoded_box_features,

@@ -4,9 +4,9 @@ ARCE communication package for OpenCOOD / OPV2V.
 This subpackage contains the ARCE communication pipeline used in
 V2X-ViT / OPV2V experiments.
 
-Planned modules:
+Key modules:
 
-1. arce_fixed_comm.py
+1. executors/fixed_executor.py
    Main fixed-policy ARCE communication pipeline:
        feature
        -> packetization
@@ -17,13 +17,13 @@ Planned modules:
        -> partial reconstruction
        -> recovered feature
 
-2. policy_fixed.py, optional later
+2. policy/fixed_policy.py
    Fixed ARCE action selection:
        Good   channel -> weaker protection / higher quality
        Medium channel -> balanced quantization + redundancy
        Bad    channel -> stronger compression / stronger redundancy
 
-3. policy_dynamic.py, optional later
+3. executors/c2mab_executor.py and policy/c2mab/
    Dynamic policy / bandit / learned ARCE controller.
 
 Design note:
@@ -35,7 +35,7 @@ Design note:
 
     Concrete modules should be imported directly where they are used:
 
-        from opencood.methods.arce.arce_fixed_comm import ARCEFixedComm
+        from opencood.methods.arce.executors.fixed_executor import ARCEFixedComm
 
     instead of:
 

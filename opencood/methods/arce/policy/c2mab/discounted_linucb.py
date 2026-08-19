@@ -16,7 +16,7 @@ from typing import Any, Dict, Iterable, Optional, Sequence
 
 import numpy as np
 
-from opencood.methods.arce.policies.feedback_corruption import channel_corruption_weight
+from opencood.methods.arce.reward.feedback_corruption import channel_corruption_weight
 
 
 @dataclass

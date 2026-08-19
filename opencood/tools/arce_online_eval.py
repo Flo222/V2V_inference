@@ -23,7 +23,7 @@ import torch
 from torch.utils.data import DataLoader
 
 import opencood.hypes_yaml.yaml_utils as yaml_utils
-from opencood.methods.arce.policies.communication_volume_summary import (
+from opencood.methods.arce.runtime.communication_volume_summary import (
     summarize_bw_records,
 )
 from opencood.data_utils.datasets import build_dataset

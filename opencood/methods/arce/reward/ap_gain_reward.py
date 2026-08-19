@@ -12,7 +12,7 @@ positive perception gain from other senders.
 from __future__ import annotations
 
 from typing import Dict, Optional, Tuple
-from opencood.methods.arce.policies.quant_quality import get_quant_loss
+from opencood.methods.arce.reward.proxy.quant_quality import get_quant_loss
 
 
 def quantization_loss(quant_mode: str, cfg=None) -> float:

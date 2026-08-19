@@ -9,14 +9,14 @@ from opencood.communication.interface import NativePayload
 
 
 try:
-    from opencood.methods.arce.arce_fixed_comm import ARCEFixedComm
+    from opencood.methods.arce.executors.fixed_executor import ARCEFixedComm
     _ARCE_FIXED_IMPORT_ERROR = None
 except Exception as exc:  # pragma: no cover
     ARCEFixedComm = None
     _ARCE_FIXED_IMPORT_ERROR = exc
 
 try:
-    from opencood.methods.arce.arce_c2mab_comm import ARCEC2MABComm
+    from opencood.methods.arce.executors.c2mab_executor import ARCEC2MABComm
     _ARCE_C2MAB_IMPORT_ERROR = None
 except Exception as exc:  # pragma: no cover
     ARCEC2MABComm = None

@@ -8,7 +8,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
-from opencood.methods.arce.policies.decoded_box_proxy_features import (
+from opencood.methods.arce.reward.proxy.decoded_box_proxy_features import (
     PAIRED_DECODED_MATCH_FEATURES,
     RICH_DECODED_BOX_FEATURES,
     delta_decoded_feature_names,

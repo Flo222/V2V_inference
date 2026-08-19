@@ -19,8 +19,8 @@ REQUIRED = [
     "opencood.communication.transport.packetization.byte_stream_packetizer",
     "opencood.communication.transport.fec.fec_base",
     "opencood.communication.transport.recovery.partial_reconstruction",
-    "opencood.methods.arce.arce_fixed_comm",
-    "opencood.methods.arce.policies.action_space",
+    "opencood.methods.arce.executors.fixed_executor",
+    "opencood.methods.arce.policy.c2mab.action_space",
 ]
 ENV_OPTIONAL = [
     "opencood.models.baselines.cosdh.models.point_pillar_cosdh_markov",

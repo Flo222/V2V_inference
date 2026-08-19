@@ -1,9 +1,11 @@
-# ARCE method layer
+# ARCE module layout
 
-This directory contains **method-specific decision logic**. It answers:
+- `controller.py`: public facade for ARCE executors and policies.
+- `executors/`: fixed and C2MAB communication execution.
+- `policy/`: fixed/random policies and C2MAB action, UCB, proposal and bank logic.
+- `context/`, `reward/`, `cost/`, `runtime/`: independent decision-support layers.
+- `transport_policy/`: payload transport actions and priority FEC scheduling.
+- `audit/`: compression and FEC recovery auditors.
 
-> Given the current payload, channel context, importance and feedback, **how should we communicate this frame/link?**
-
-It may choose quantization mode, redundancy/FEC level, sending decision, priority order and recovery policy. The implementations of INT4/INT8, byte packetization, RaptorQ/XOR, Markov channel behavior and generic recovery operators live in `opencood.communication`.
-
-The current validated executors (`ARCEFixedComm`, `ARCEC2MABComm`) are retained to avoid changing numerical experiment semantics during this structural refactor. New refactoring should progressively delegate mechanics to `CommunicationPipeline` rather than re-implement them here.
+`common.py` contains shared ARCE/C2MAB helpers.  Import implementations from
+the role-specific packages above; use `controller.py` for the public facade.

@@ -567,7 +567,7 @@ def main():
     repo_root = Path(__file__).resolve().parents[2]
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
-    from opencood.methods.arce.policies.discounted_linucb import DiscountedLinUCB
+    from opencood.methods.arce.policy.c2mab.discounted_linucb import DiscountedLinUCB
 
     groups, action_ids, input_audit = load_groups(args.csv, args)
     sender_groups = [

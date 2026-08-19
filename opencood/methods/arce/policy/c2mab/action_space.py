@@ -32,7 +32,7 @@ from dataclasses import dataclass, asdict
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 try:
-    from opencood.methods.arce.fixed_policy import ARCEAction
+    from opencood.methods.arce.policy.fixed_policy import ARCEAction
     from opencood.communication.transport.recovery import (
         RECOVERY_METHOD_TEMPORAL_CACHE,
         RECOVERY_METHOD_SPATIAL_INTERPOLATION,
@@ -45,7 +45,7 @@ except Exception:  # pragma: no cover
     RECOVERY_METHOD_ZERO_FILL = "zero_fill"
 
 
-from opencood.methods.arce.policies.action_adapter import normalize_runtime_action
+from opencood.methods.arce.transport_policy.action_adapter import normalize_runtime_action
 
 
 # ----------------------------------------------------------------------

@@ -4,11 +4,11 @@ from typing import Any, Callable, Dict, Optional
 
 import torch
 
-from opencood.methods.arce.c2mab_local_confidence import get_cav_confidence
-from opencood.methods.arce.policies.c2mab_execution_record_builder import (
+from opencood.methods.arce.context.local_confidence import get_cav_confidence
+from opencood.methods.arce.runtime.execution_record_builder import (
     build_no_send_system_budget_record,
 )
-from opencood.methods.arce.policies.reward_pending_builder import (
+from opencood.methods.arce.reward.reward_pending_builder import (
     build_no_send_pending_reward_item,
 )
 

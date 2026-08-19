@@ -14,7 +14,7 @@ import opencood.hypes_yaml.yaml_utils as yaml_utils
 from opencood.tools import train_utils
 from opencood.data_utils.datasets import build_dataset
 from opencood.utils import eval_utils
-from opencood.methods.arce.policies.ap_proxy_features import (
+from opencood.methods.arce.reward.proxy.ap_proxy_features import (
     DENSE_AP_PROXY_FEATURES,
     dense_ap_proxy_features,
 )

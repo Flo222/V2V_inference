@@ -78,7 +78,7 @@ def _round_rho(x: Any) -> float:
 
 
 def _load_actions() -> List[Any]:
-    from opencood.methods.arce.policies.action_space import build_pdf_action_space
+    from opencood.methods.arce.policy.c2mab.action_space import build_pdf_action_space
 
     try:
         actions = build_pdf_action_space()
@@ -145,7 +145,7 @@ def main() -> None:
     quant_quality_status = "missing"
     quant_quality_default = {}
     try:
-        from opencood.methods.arce.policies.quant_quality import (
+        from opencood.methods.arce.reward.proxy.quant_quality import (
             DEFAULT_QUANT_QUALITY,
             get_quant_quality,
             get_quant_loss,

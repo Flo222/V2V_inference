@@ -5,7 +5,7 @@ import unittest
 
 import torch
 
-from opencood.methods.arce.priority_block_fec_transport import (
+from opencood.methods.arce.transport_policy.priority_fec_scheduler import (
     PriorityBlockFECTransport,
 )
 from opencood.communication.transport.fec.fec_raptorq import (

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 import torch
-from opencood.methods.arce.policies.complementarity import ego_complementarity, mask_iou, overlap_with_selected, union_masks
+from opencood.methods.arce.context.complementarity import ego_complementarity, mask_iou, overlap_with_selected, union_masks
 
 
 def main():

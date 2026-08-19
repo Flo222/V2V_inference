@@ -13,7 +13,7 @@ import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from opencood.methods.arce.policies.ap_proxy_features import (
+from opencood.methods.arce.reward.proxy.ap_proxy_features import (
     HEAD_AP_PROXY_FEATURES,
     PAIRED_SPATIAL_AP_PROXY_FEATURES,
 )

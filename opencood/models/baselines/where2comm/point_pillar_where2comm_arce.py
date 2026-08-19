@@ -18,8 +18,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from opencood.methods.arce.c2mab_local_confidence import local_cav_confidences_from_psm, local_cav_confidence_maps_from_psm
-from opencood.methods.arce.policies.ap_proxy_features import (
+from opencood.methods.arce.context.local_confidence import local_cav_confidences_from_psm, local_cav_confidence_maps_from_psm
+from opencood.methods.arce.reward.proxy.ap_proxy_features import (
     DENSE_AP_PROXY_FEATURES,
     HEAD_AP_PROXY_FEATURES,
     dense_ap_proxy_features,
@@ -37,14 +37,14 @@ from opencood.models.common.sub_modules.pillar_vfe import PillarVFE
 from opencood.models.common.sub_modules.point_pillar_scatter import PointPillarScatter
 
 try:
-    from opencood.methods.arce.arce_fixed_comm import ARCEFixedComm
+    from opencood.methods.arce.executors.fixed_executor import ARCEFixedComm
     _ARCE_FIXED_IMPORT_ERROR = None
 except Exception as e:  # pragma: no cover
     ARCEFixedComm = None
     _ARCE_FIXED_IMPORT_ERROR = e
 
 try:
-    from opencood.methods.arce.arce_c2mab_comm import ARCEC2MABComm
+    from opencood.methods.arce.executors.c2mab_executor import ARCEC2MABComm
     _ARCE_C2MAB_IMPORT_ERROR = None
 except Exception as e:  # pragma: no cover
     ARCEC2MABComm = None

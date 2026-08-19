@@ -13,7 +13,7 @@ import random
 from typing import Any, Dict, List, Optional
 
 from opencood.methods.arce import extract_arce_cfg
-from opencood.methods.arce.fixed_policy import (
+from opencood.methods.arce.policy.fixed_policy import (
     ARCEAction,
     normalize_action_config,
 )

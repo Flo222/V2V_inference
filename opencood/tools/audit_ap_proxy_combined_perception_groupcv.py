@@ -14,13 +14,13 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import GroupKFold
 
-from opencood.methods.arce.policies.ap_proxy_features import (
+from opencood.methods.arce.reward.proxy.ap_proxy_features import (
     DENSE_AP_PROXY_FEATURES,
     PAIRED_SPATIAL_AP_PROXY_FEATURES,
     PSM_V3_EXTRA_FEATURES,
     REGRESSION_AP_PROXY_FEATURES,
 )
-from opencood.methods.arce.policies.decoded_box_proxy_features import (
+from opencood.methods.arce.reward.proxy.decoded_box_proxy_features import (
     PAIRED_DECODED_MATCH_FEATURES,
     RICH_DECODED_BOX_FEATURES,
     SIMPLE_DECODED_BOX_FEATURES,

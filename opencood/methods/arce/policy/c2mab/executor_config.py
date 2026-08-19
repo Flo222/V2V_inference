@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict, Optional
 
-from opencood.methods.arce.policies.payload_transport import (
+from opencood.methods.arce.transport_policy.payload_transport import (
     apply_payload_native_transport_to_arce_cfg,
 )
 

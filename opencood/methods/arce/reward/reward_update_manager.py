@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from opencood.methods.arce.policies.ap_gain_reward import c2mab_ap_gain_reward
+from opencood.methods.arce.reward.ap_gain_reward import c2mab_ap_gain_reward
 
 
 def _safe_float(x: Any, default: float = 0.0) -> float:
